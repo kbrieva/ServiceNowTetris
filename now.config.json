@@ -1,0 +1,6 @@
+{
+  "scope": "global",
+  "scopeId": "abe586500f334f50030a4ff800d1b205",
+  "name": "Game",
+  "tsconfigPath": "./src/server/tsconfig.json"
+}

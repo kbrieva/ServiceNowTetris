@@ -1,0 +1,60 @@
+.hs-panel {
+  background: rgba(26, 26, 46, 0.92);
+  border: 1px solid #2a2a4e;
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 200px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.hs-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #E69F00;
+  margin: 0 0 12px 0;
+  text-align: center;
+}
+
+.hs-empty {
+  color: #666;
+  font-style: italic;
+  text-align: center;
+  font-size: 13px;
+}
+
+.hs-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.hs-table th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #888;
+  padding: 4px 6px;
+  border-bottom: 1px solid #333;
+  text-align: left;
+}
+
+.hs-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid #1a1a2e;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.hs-rank-1 td {
+  color: #E69F00;
+  font-weight: 700;
+}
+
+.hs-rank-2 td {
+  color: #c0c0c0;
+}
+
+.hs-rank-3 td {
+  color: #CC79A7;
+}
