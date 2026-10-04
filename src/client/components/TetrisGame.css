@@ -63,6 +63,40 @@
   margin: 0;
 }
 
+/* Combo display */
+.combo-display {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+
+.combo-active {
+  font-size: 26px;
+  font-weight: 700;
+  color: #F0E442;
+  font-variant-numeric: tabular-nums;
+}
+
+.combo-zero {
+  font-size: 26px;
+  font-weight: 700;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+}
+
+.combo-bonus {
+  font-size: 14px;
+  font-weight: 600;
+  color: #E69F00;
+  animation: combo-pop 0.4s ease-out;
+}
+
+@keyframes combo-pop {
+  0% { transform: scale(1.5); opacity: 0.5; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 /* Swap counter */
 .swap-counter {
   display: flex;

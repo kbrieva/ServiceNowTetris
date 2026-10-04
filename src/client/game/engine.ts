@@ -185,6 +185,21 @@ export function calcScore(linesCleared: number, level: number): number {
   return (LINE_SCORES[linesCleared] || 0) * level;
 }
 
+/** Combo bonus: consecutive line clears earn escalating bonus.
+ *  comboCount 1 → +100, 2 → +200, 3 → +300, etc. */
+export function calcComboBonus(comboCount: number): number {
+  return comboCount * 100;
+}
+
+/** Milestone messages based on total lines cleared. */
+export const MILESTONES: { lines: number; text: string }[] = [
+  { lines: 20,  text: "Good!" },
+  { lines: 40,  text: "Great!" },
+  { lines: 60,  text: "You're a Tetris Pro!" },
+  { lines: 100, text: "You're a Tetris God!" },
+  { lines: 150, text: "INSANE!" },
+];
+
 /** Compute the ghost-piece Y (where the piece would land). */
 export function ghostY(board: Board, piece: ActivePiece): number {
   let dy = 0;
