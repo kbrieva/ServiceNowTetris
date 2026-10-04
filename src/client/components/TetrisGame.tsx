@@ -6,6 +6,12 @@ import {
   ghostY, MILESTONES,
 } from "../game/engine";
 import HighScoresPanel from "./HighScoresPanel";
+import {
+  pieceLock, pieceMove, pieceRotate, hardDropSound,
+  lineClear1, lineClear2, lineClear3, lineClear4,
+  comboSound, milestoneSound, deathSound, gameOverSound,
+  levelUpSound, swapSound,
+} from "../game/sounds";
 import "./TetrisGame.css";
 
 const PREVIEW_BLOCK = 20;
@@ -157,6 +163,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
       for (let i = MILESTONES.length - 1; i >= 0; i--) {
         if (lines >= MILESTONES[i].lines && MILESTONES[i].lines > lastMilestoneShown) {
           lastMilestoneShown = MILESTONES[i].lines;
+          milestoneSound(); // 🔊 milestone fanfare
           milestoneToast = {
             text: MILESTONES[i].text,
             sub: lines + " lines cleared!",
@@ -172,6 +179,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
       next = randomPieceDef();
       if (!isValid(board, piece)) {
         lives--;
+        deathSound(); // 🔊 life lost
         // Trigger death effect
         deathToast = {
           text: "LIFE LOST",
@@ -181,6 +189,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         sync();
         if (lives <= 0) {
           over = true;
+          gameOverSound(); // 🔊 game over
           cbRef.current(score, level, lines);
           return;
         }
@@ -193,20 +202,28 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
     function lock() {
       if (!current) return;
       board = lockPiece(board, current);
+      pieceLock(); // 🔊 piece lock click
       const res = clearLines(board);
       board = res.board;
 
       if (res.cleared > 0) {
+        // 🔊 line clear sounds — escalate 1→4
+        if (res.cleared === 1) lineClear1();
+        else if (res.cleared === 2) lineClear2();
+        else if (res.cleared === 3) lineClear3();
+        else lineClear4();
+
         combo++;
         const cb = calcComboBonus(combo);
         score += calcScore(res.cleared, level) + cb;
         lines += res.cleared;
         const nl = Math.min(10, Math.floor(lines / 10) + 1);
-        if (nl !== level) { swapsUsed = 0; prevLevel = nl; }
+        if (nl !== level) { swapsUsed = 0; prevLevel = nl; levelUpSound(); } // 🔊 level up
         level = nl;
 
         // Combo toast (bottom) — independent from milestone
         if (combo > 1) {
+          comboSound(combo); // 🔊 combo
           comboToast = {
             text: "🔥 COMBO x" + combo,
             sub: "+" + cb + " bonus!",
@@ -225,6 +242,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
 
     function hardDrop() {
       if (!current) return;
+      hardDropSound(); // 🔊 hard drop thud
       current.y = ghostY(board, current);
       lock();
     }
@@ -321,10 +339,10 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
       if (over || paused || !current) return;
       switch (e.key) {
         case "ArrowLeft":
-          if (isValid(board, current, -1, 0)) current.x--;
+          if (isValid(board, current, -1, 0)) { current.x--; pieceMove(); } // 🔊
           e.preventDefault(); e.stopPropagation(); break;
         case "ArrowRight":
-          if (isValid(board, current, 1, 0)) current.x++;
+          if (isValid(board, current, 1, 0)) { current.x++; pieceMove(); } // 🔊
           e.preventDefault(); e.stopPropagation(); break;
         case "ArrowDown":
           if (isValid(board, current, 0, 1)) { current.y++; lastDrop = performance.now(); }
@@ -332,7 +350,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         case "ArrowUp": {
           const rot = rotate(current.shape);
           const t: ActivePiece = { ...current, shape: rot };
-          if (isValid(board, t)) current.shape = rot;
+          if (isValid(board, t)) { current.shape = rot; pieceRotate(); } // 🔊
           e.preventDefault(); e.stopPropagation(); break;
         }
         case " ":
@@ -342,7 +360,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
           const old = next;
           next = { shape: current.shape, color: current.color, isBonus: current.isBonus };
           const sw = spawnPiece(old);
-          if (isValid(board, sw)) { current = sw; lastDrop = performance.now(); swapsUsed++; sync(); }
+          if (isValid(board, sw)) { current = sw; lastDrop = performance.now(); swapsUsed++; swapSound(); sync(); } // 🔊
           else { next = old; }
           e.preventDefault(); e.stopPropagation(); break;
         }
