@@ -21,9 +21,60 @@
   font-size: 48px;
   font-weight: 900;
   color: #D55E00;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   letter-spacing: 4px;
   text-shadow: 0 0 20px rgba(213, 94, 0, 0.5);
+}
+
+/* ── Congratulations banners ── */
+.congrats-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  text-align: left;
+  animation: congrats-slide 0.6s ease-out;
+}
+.congrats-icon {
+  font-size: 36px;
+  flex-shrink: 0;
+}
+.congrats-text strong {
+  display: block;
+  font-size: 17px;
+  color: #fff;
+  margin-bottom: 2px;
+}
+.congrats-text p {
+  margin: 0;
+  font-size: 14px;
+}
+.congrats-top1 {
+  background: linear-gradient(135deg, rgba(230,159,0,0.2), rgba(230,159,0,0.08));
+  border: 2px solid #E69F00;
+}
+.congrats-top1 .congrats-text p {
+  color: #E69F00;
+}
+.congrats-top10 {
+  background: linear-gradient(135deg, rgba(86,180,233,0.15), rgba(86,180,233,0.05));
+  border: 2px solid #56B4E9;
+}
+.congrats-top10 .congrats-text p {
+  color: #56B4E9;
+}
+@keyframes congrats-slide {
+  0% { opacity: 0; transform: translateY(-12px) scale(0.95); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Highlight player's row in the table ── */
+.highlight-me td {
+  color: #56B4E9 !important;
+  font-weight: 700 !important;
+  background: rgba(86, 180, 233, 0.08);
 }
 
 .gameover-stats {

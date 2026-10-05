@@ -58,6 +58,7 @@ export default function App() {
           score={result.score}
           level={result.level}
           lines={result.lines}
+          playerName={playerName}
           onRestart={handleRestart}
         />
       )}
