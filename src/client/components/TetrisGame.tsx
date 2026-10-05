@@ -214,7 +214,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         else lineClear4();
 
         combo++;
-        const cb = calcComboBonus(combo);
+        const cb = calcComboBonus(combo, level);
         score += calcScore(res.cleared, level) + cb;
         lines += res.cleared;
         const nl = Math.min(10, Math.floor(lines / 10) + 1);
@@ -384,39 +384,65 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
 
   return (
     <div className="tetris-container" ref={containerRef} tabIndex={0}>
-      <canvas ref={canvasRef} width={COLS * BLOCK_SIZE} height={ROWS * BLOCK_SIZE} className="tetris-canvas" />
-      <div className="tetris-sidebar">
+      {/* ── TOP BAR: Score | Combo | Level ── */}
+      <div className="top-bar">
+        <div className="sidebar-section">
+          <h3>Score</h3>
+          <p className="stat-value-lg">{display.score.toLocaleString()}</p>
+        </div>
+        <div className="sidebar-section">
+          <h3>🔥 Combo</h3>
+          <div className="combo-display">
+            <span className={display.combo > 0 ? "combo-active" : "combo-zero"}>x{display.combo}</span>
+            {display.combo > 1 && <span className="combo-bonus">+{(display.combo * 100 * display.level).toLocaleString()}</span>}
+          </div>
+        </div>
+        <div className="sidebar-section">
+          <h3>Level</h3>
+          <p className="stat-value-lg">{display.level}</p>
+        </div>
+      </div>
+
+      {/* ── LEFT PANEL: Swap → Lines → Restart ── */}
+      <div className="left-panel">
+        <div className="sidebar-section">
+          <h3>⇧ Swap</h3>
+          <div className="swap-counter">
+            <span className={swapsLeft > 0 ? "swap-available" : "swap-empty"}>{swapsLeft}</span>
+            <span className="swap-label">/ {display.swapsMax}</span>
+          </div>
+        </div>
+        <div className="sidebar-section">
+          <h3>Lines</h3>
+          <p className="stat-value">{display.lines}</p>
+        </div>
+        {display.paused && <div className="pause-badge">⏸ PAUSED</div>}
+        <button className="restart-btn" onClick={onRestart}>⟳ Restart</button>
+      </div>
+
+      {/* ── CENTER: Game board ── */}
+      <div className="board-area">
+        <canvas ref={canvasRef} width={COLS * BLOCK_SIZE} height={ROWS * BLOCK_SIZE} className="tetris-canvas" />
+      </div>
+
+      {/* ── RIGHT PANEL: Player, Lives, Next, High Scores ── */}
+      <div className="right-panel">
         <div className="sidebar-section"><h3>Player</h3><p className="player-name">{playerName}</p></div>
         <div className="sidebar-section"><h3>Lives</h3><p className="lives-display">{hearts(display.lives)}</p></div>
         <div className="sidebar-section">
           <h3>Next</h3>
           <canvas ref={previewRef} width={100} height={80} className="preview-canvas" />
         </div>
-        <div className="sidebar-section"><h3>Score</h3><p className="stat-value">{display.score.toLocaleString()}</p></div>
-        <div className="sidebar-section">
-          <h3>🔥 Combo</h3>
-          <div className="combo-display">
-            <span className={display.combo > 0 ? "combo-active" : "combo-zero"}>x{display.combo}</span>
-            {display.combo > 1 && <span className="combo-bonus">+{(display.combo * 100).toLocaleString()}</span>}
-          </div>
-        </div>
-        <div className="sidebar-section"><h3>Level</h3><p className="stat-value">{display.level}</p></div>
-        <div className="sidebar-section"><h3>Lines</h3><p className="stat-value">{display.lines}</p></div>
-        <div className="sidebar-section">
-          <h3>⇧ Swap</h3>
-          <div className="swap-counter">
-            <span className={swapsLeft > 0 ? "swap-available" : "swap-empty"}>{swapsLeft}</span>
-            <span className="swap-label">/ {display.swapsMax} left</span>
-          </div>
-        </div>
-        {display.paused && <div className="pause-badge">⏸ PAUSED</div>}
-        <button className="restart-btn" onClick={onRestart}>⟳ Restart</button>
+        <HighScoresPanel />
+      </div>
+
+      {/* ── BOTTOM: Controls guide ── */}
+      <div className="bottom-bar">
         <div className="controls-hint">
-          <p>← → Move</p><p>↑ Rotate</p><p>↓ Soft Drop</p>
-          <p>Space Hard Drop</p><p>⇧ Shift Swap</p><p>Esc Pause</p>
+          <span>← → Move</span><span>↑ Rotate</span><span>↓ Soft Drop</span>
+          <span>Space Hard Drop</span><span>⇧ Shift Swap</span><span>Esc Pause</span>
         </div>
       </div>
-      <HighScoresPanel />
     </div>
   );
 }
