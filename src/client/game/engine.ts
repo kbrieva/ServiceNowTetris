@@ -94,14 +94,44 @@ function cloneShape(s: Shape): Shape {
   return out;
 }
 
+/* ── Anti-repeat: no 3 consecutive identical pieces ── */
+const recentColors: string[] = [];   // tracks last 2 piece colors
+const MAX_REROLL = 5;                // safety cap to avoid infinite loop
+
+function wouldTriple(color: string): boolean {
+  return recentColors.length >= 2
+    && recentColors[recentColors.length - 1] === color
+    && recentColors[recentColors.length - 2] === color;
+}
+
+function pushHistory(color: string) {
+  recentColors.push(color);
+  if (recentColors.length > 2) recentColors.shift();
+}
+
 export function randomPieceDef(): PieceDef {
-  if (Math.random() < 0.15 && BONUS_NAMES.length > 0) {
-    const name = BONUS_NAMES[Math.floor(Math.random() * BONUS_NAMES.length)];
-    const def = BONUS_PIECE_DEFS[name];
-    return { shape: cloneShape(def.shape), color: def.color, isBonus: true };
+  for (let attempt = 0; attempt < MAX_REROLL; attempt++) {
+    // 15% bonus chance
+    if (Math.random() < 0.15 && BONUS_NAMES.length > 0) {
+      const name = BONUS_NAMES[Math.floor(Math.random() * BONUS_NAMES.length)];
+      const def = BONUS_PIECE_DEFS[name];
+      if (!wouldTriple(def.color) || attempt === MAX_REROLL - 1) {
+        pushHistory(def.color);
+        return { shape: cloneShape(def.shape), color: def.color, isBonus: true };
+      }
+      continue;
+    }
+    const name = PIECE_NAMES[Math.floor(Math.random() * PIECE_NAMES.length)];
+    const def = PIECE_DEFS[name];
+    if (!wouldTriple(def.color) || attempt === MAX_REROLL - 1) {
+      pushHistory(def.color);
+      return { shape: cloneShape(def.shape), color: def.color };
+    }
   }
-  const name = PIECE_NAMES[Math.floor(Math.random() * PIECE_NAMES.length)];
+  // Fallback (should never reach here due to MAX_REROLL - 1 guard)
+  const name = PIECE_NAMES[0];
   const def = PIECE_DEFS[name];
+  pushHistory(def.color);
   return { shape: cloneShape(def.shape), color: def.color };
 }
 
