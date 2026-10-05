@@ -215,10 +215,11 @@ export function calcScore(linesCleared: number, level: number): number {
   return (LINE_SCORES[linesCleared] || 0) * level;
 }
 
-/** Combo bonus: consecutive line clears earn escalating bonus.
- *  comboCount 1 → +100, 2 → +200, 3 → +300, etc. */
-export function calcComboBonus(comboCount: number): number {
-  return comboCount * 100;
+/** Combo bonus: consecutive line clears earn escalating bonus, doubled per level.
+ *  Formula: comboCount × 100 × level
+ *  e.g. combo x3 at level 5 → 3 × 100 × 5 = 1,500 bonus */
+export function calcComboBonus(comboCount: number, level: number): number {
+  return comboCount * 100 * level;
 }
 
 /** Milestone messages based on total lines cleared. */

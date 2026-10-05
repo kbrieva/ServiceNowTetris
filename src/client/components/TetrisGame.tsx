@@ -214,7 +214,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         else lineClear4();
 
         combo++;
-        const cb = calcComboBonus(combo);
+        const cb = calcComboBonus(combo, level);
         score += calcScore(res.cleared, level) + cb;
         lines += res.cleared;
         const nl = Math.min(10, Math.floor(lines / 10) + 1);
@@ -394,7 +394,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
           <h3>🔥 Combo</h3>
           <div className="combo-display">
             <span className={display.combo > 0 ? "combo-active" : "combo-zero"}>x{display.combo}</span>
-            {display.combo > 1 && <span className="combo-bonus">+{(display.combo * 100).toLocaleString()}</span>}
+            {display.combo > 1 && <span className="combo-bonus">+{(display.combo * 100 * display.level).toLocaleString()}</span>}
           </div>
         </div>
         <div className="sidebar-section">
