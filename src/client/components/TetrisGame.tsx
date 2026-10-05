@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import {
   COLS, ROWS, BLOCK_SIZE, Board, ActivePiece, PieceDef,
-  createBoard, randomPieceDef, spawnPiece, isValid, rotate,
+  createBoard, randomPieceDef, spawnPiece, isValid, tryRotate,
   lockPiece, clearLines, getSpeed, calcScore, calcComboBonus,
   ghostY, MILESTONES,
 } from "../game/engine";
@@ -348,9 +348,8 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
           if (isValid(board, current, 0, 1)) { current.y++; lastDrop = performance.now(); }
           e.preventDefault(); e.stopPropagation(); break;
         case "ArrowUp": {
-          const rot = rotate(current.shape);
-          const t: ActivePiece = { ...current, shape: rot };
-          if (isValid(board, t)) { current.shape = rot; pieceRotate(); } // 🔊
+          const kick = tryRotate(board, current);
+          if (kick) { current.shape = kick.shape; current.x += kick.dx; current.y += kick.dy; pieceRotate(); }
           e.preventDefault(); e.stopPropagation(); break;
         }
         case " ":
