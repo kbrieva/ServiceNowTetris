@@ -174,6 +174,52 @@ export function rotate(shape: Shape): Shape {
   return result;
 }
 
+/* ── Wall Kick Rotation ──────────────────────────────────────
+ *  When basic rotation collides with a wall or locked blocks,
+ *  try shifting the piece by a series of offsets (kicks).
+ *  The I piece uses wider kicks (±1, ±2) because it's 4 wide.
+ *  Other pieces use standard kicks (±1, then ±1 up).
+ * ──────────────────────────────────────────────────────────── */
+
+/** Standard wall kick offsets for T/S/Z/J/L and bonus pieces */
+const STANDARD_KICKS: [number, number][] = [
+  [0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1],
+];
+
+/** I-piece wall kick offsets — needs wider range */
+const I_KICKS: [number, number][] = [
+  [0, 0], [-1, 0], [1, 0], [-2, 0], [2, 0],
+  [0, -1], [-1, -1], [1, -1], [-2, -1], [2, -1],
+  [0, -2],
+];
+
+function isIPiece(shape: Shape): boolean {
+  // I piece is the only piece with a row of 4, or a column of 4
+  if (shape.length === 1 && shape[0].length === 4) return true;  // horizontal
+  if (shape.length === 4 && shape[0].length === 1) return true;  // vertical
+  return false;
+}
+
+/** Try to rotate a piece with wall kicks.
+ *  Returns { shape, dx, dy } if successful, or null if no valid position found. */
+export function tryRotate(
+  board: Board,
+  piece: ActivePiece,
+): { shape: Shape; dx: number; dy: number } | null {
+  const rotated = rotate(piece.shape);
+  const kicks = isIPiece(piece.shape) ? I_KICKS : STANDARD_KICKS;
+  const test: ActivePiece = { ...piece, shape: rotated };
+
+  for (let i = 0; i < kicks.length; i++) {
+    const dx = kicks[i][0];
+    const dy = kicks[i][1];
+    if (isValid(board, test, dx, dy)) {
+      return { shape: rotated, dx, dy };
+    }
+  }
+  return null; // no valid position found
+}
+
 export function lockPiece(board: Board, piece: ActivePiece): Board {
   const nb: Board = new Array(board.length);
   for (let i = 0; i < board.length; i++) {
