@@ -39,12 +39,14 @@
   grid-area: board;
   display: flex;
   justify-content: center;
+  touch-action: none;
 }
 .tetris-canvas {
   border: 2px solid #56B4E9;
   border-radius: 4px;
   box-shadow: 0 0 20px rgba(86, 180, 233, 0.2);
   display: block;
+  touch-action: none;
 }
 
 /* ── Right panel: Player, Lives, Next, HighScores ── */
@@ -221,4 +223,66 @@
 }
 .controls-hint span {
   white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════
+   MOBILE RESPONSIVE — max-width: 768px
+   ═══════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  /* Switch to single-column stacked layout */
+  .tetris-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    max-height: none;
+    padding: 8px;
+    touch-action: none;
+    width: 100%;
+  }
+
+  /* Hide desktop panels */
+  .left-panel,
+  .right-panel,
+  .bottom-bar {
+    display: none;
+  }
+
+  /* Compact top bar */
+  .top-bar {
+    gap: 6px;
+    width: 100%;
+    max-width: 320px;
+  }
+  .top-bar .sidebar-section {
+    padding: 6px 8px;
+    max-width: none;
+  }
+  .top-bar .sidebar-section h3 {
+    font-size: 9px;
+    margin: 0 0 2px 0;
+    letter-spacing: 1px;
+  }
+  .stat-value-lg {
+    font-size: 18px;
+  }
+  .combo-active,
+  .combo-zero {
+    font-size: 16px;
+  }
+  .combo-bonus {
+    font-size: 11px;
+  }
+
+  /* Canvas scaling for mobile */
+  .board-area {
+    width: 100%;
+    max-width: 320px;
+    display: flex;
+    justify-content: center;
+  }
+  .tetris-canvas {
+    width: min(300px, 85vw);
+    height: auto;
+  }
 }

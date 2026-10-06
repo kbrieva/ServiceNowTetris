@@ -1,0 +1,148 @@
+/* ── Mobile Touch Controls ── */
+.mobile-controls {
+  display: none; /* Hidden by default, shown via media query */
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px;
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ── Row containers ── */
+.mobile-controls-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+/* ── Base button style ── */
+.mobile-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 2px solid #2a2a4e;
+  border-radius: 10px;
+  background: rgba(26, 26, 46, 0.95);
+  color: #c0c0c0;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.1s, border-color 0.1s, transform 0.08s;
+  padding: 12px 8px;
+  min-height: 48px;
+  flex: 1;
+}
+.mobile-btn:active {
+  background: rgba(86, 180, 233, 0.25);
+  border-color: #56B4E9;
+  transform: scale(0.95);
+}
+
+/* ── Emoji icons ── */
+.mobile-btn-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* ── Directional buttons ── */
+.mobile-btn-left,
+.mobile-btn-right {
+  flex: 1.2;
+}
+.mobile-btn-left {
+  border-color: #3a3a5e;
+}
+.mobile-btn-right {
+  border-color: #3a3a5e;
+}
+.mobile-btn-down {
+  flex: 1;
+}
+
+/* ── Action buttons (top row) ── */
+.mobile-btn-rotate {
+  border-color: #0072B2;
+  color: #56B4E9;
+}
+.mobile-btn-rotate:active {
+  background: rgba(0, 114, 178, 0.3);
+  border-color: #56B4E9;
+}
+.mobile-btn-swap {
+  border-color: #E69F00;
+  color: #F0E442;
+}
+.mobile-btn-swap:active {
+  background: rgba(230, 159, 0, 0.3);
+  border-color: #F0E442;
+}
+.mobile-btn-pause {
+  border-color: #555;
+  color: #aaa;
+}
+.mobile-btn-pause:active {
+  background: rgba(100, 100, 100, 0.3);
+  border-color: #aaa;
+}
+
+/* ── Hard drop (full width) ── */
+.mobile-btn-harddrop {
+  border-color: #D55E00;
+  color: #ff7733;
+  font-size: 15px;
+}
+.mobile-btn-harddrop:active {
+  background: rgba(213, 94, 0, 0.3);
+  border-color: #ff7733;
+}
+
+/* ── Mobile stats bar (shown on mobile above canvas) ── */
+.mobile-stats-bar {
+  display: none; /* shown via media query */
+  justify-content: space-around;
+  align-items: center;
+  padding: 6px 8px;
+  background: rgba(26, 26, 46, 0.9);
+  border: 1px solid #2a2a4e;
+  border-radius: 8px;
+  gap: 4px;
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+}
+.mobile-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.mobile-stat-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #56B4E9;
+}
+.mobile-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Show on mobile ── */
+@media (max-width: 768px) {
+  .mobile-controls {
+    display: flex;
+  }
+  .mobile-stats-bar {
+    display: flex;
+  }
+}

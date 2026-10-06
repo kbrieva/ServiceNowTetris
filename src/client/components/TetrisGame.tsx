@@ -6,6 +6,7 @@ import {
   ghostY, MILESTONES, findFullRows, isBoardEmpty, BOARD_CLEAR_BONUS,
 } from "../game/engine";
 import HighScoresPanel from "./HighScoresPanel";
+import MobileControls, { GameActions } from "./MobileControls";
 import {
   pieceLock, pieceMove, pieceRotate, hardDropSound,
   lineClear1, lineClear2, lineClear3, lineClear4,
@@ -19,6 +20,10 @@ const INITIAL_LIVES = 3;
 const TOAST_MS = 1800;
 const DEATH_MS = 2200;
 const BOARD_CLEAR_EFFECT_DUR = 800;
+
+/* Detect touch device */
+const IS_TOUCH = typeof window !== "undefined" &&
+  ("ontouchstart" in window || navigator.maxTouchPoints > 0);
 
 interface Props {
   playerName: string;
@@ -352,6 +357,17 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
   const cbRef = useRef(onGameOver);
   cbRef.current = onGameOver;
 
+  /* ── Game actions ref — exposed to MobileControls and swipe handler ── */
+  const gameActionsRef = useRef<GameActions>({
+    moveLeft: () => {},
+    moveRight: () => {},
+    rotate: () => {},
+    softDrop: () => {},
+    hardDrop: () => {},
+    swap: () => {},
+    pause: () => {},
+  });
+
   const [display, setDisplay] = useState({
     score: 0, level: 1, lines: 0, lives: INITIAL_LIVES,
     paused: false, swapsUsed: 0, swapsMax: 1, combo: 0,
@@ -518,12 +534,61 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
       }
     }
 
-    function hardDrop() {
+    function hardDropFn() {
       if (!current) return;
       hardDropSound(); // 🔊 hard drop thud
       current.y = ghostY(board, current);
       lock();
     }
+
+    /* ── Shared action functions (called by keyboard AND touch) ── */
+    function moveLeft() {
+      if (over || paused || !current || pendingClear) return;
+      if (isValid(board, current, -1, 0)) { current.x--; pieceMove(); }
+    }
+    function moveRight() {
+      if (over || paused || !current || pendingClear) return;
+      if (isValid(board, current, 1, 0)) { current.x++; pieceMove(); }
+    }
+    function rotatePiece() {
+      if (over || paused || !current || pendingClear) return;
+      const kick = tryRotate(board, current);
+      if (kick) { current.shape = kick.shape; current.x += kick.dx; current.y += kick.dy; pieceRotate(); }
+    }
+    function softDrop() {
+      if (over || paused || !current || pendingClear) return;
+      if (isValid(board, current, 0, 1)) { current.y++; lastDrop = performance.now(); }
+    }
+    function doHardDrop() {
+      if (over || paused || !current || pendingClear) return;
+      hardDropFn();
+    }
+    function swapPiece() {
+      if (over || paused || !current || pendingClear) return;
+      if (swapsUsed >= level) return;
+      const old = next;
+      next = { shape: current.shape, color: current.color, isBonus: current.isBonus };
+      const sw = spawnPiece(old);
+      if (isValid(board, sw)) { current = sw; lastDrop = performance.now(); swapsUsed++; swapSound(); sync(); }
+      else { next = old; }
+    }
+    function togglePause() {
+      if (over) return;
+      paused = !paused;
+      if (!paused) lastDrop = performance.now();
+      sync();
+    }
+
+    /* ── Expose actions to touch controls via ref ── */
+    gameActionsRef.current = {
+      moveLeft,
+      moveRight,
+      rotate: rotatePiece,
+      softDrop,
+      hardDrop: doHardDrop,
+      swap: swapPiece,
+      pause: togglePause,
+    };
 
     function draw() {
       const W = canvas.width, H = canvas.height;
@@ -657,51 +722,100 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
       rafId = requestAnimationFrame(loop);
     }
 
-    function togglePause() {
-      paused = !paused;
-      if (!paused) lastDrop = performance.now();
-      sync();
-    }
-
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (!over) togglePause();
+        togglePause();
         e.preventDefault(); e.stopPropagation(); return;
       }
       if (over || paused || !current || pendingClear) return;
       switch (e.key) {
         case "ArrowLeft":
-          if (isValid(board, current, -1, 0)) { current.x--; pieceMove(); } // 🔊
+          moveLeft();
           e.preventDefault(); e.stopPropagation(); break;
         case "ArrowRight":
-          if (isValid(board, current, 1, 0)) { current.x++; pieceMove(); } // 🔊
+          moveRight();
           e.preventDefault(); e.stopPropagation(); break;
         case "ArrowDown":
-          if (isValid(board, current, 0, 1)) { current.y++; lastDrop = performance.now(); }
+          softDrop();
           e.preventDefault(); e.stopPropagation(); break;
-        case "ArrowUp": {
-          const kick = tryRotate(board, current);
-          if (kick) { current.shape = kick.shape; current.x += kick.dx; current.y += kick.dy; pieceRotate(); }
+        case "ArrowUp":
+          rotatePiece();
           e.preventDefault(); e.stopPropagation(); break;
-        }
         case " ":
-          hardDrop(); e.preventDefault(); e.stopPropagation(); break;
-        case "Shift": {
-          if (swapsUsed >= level) break;
-          const old = next;
-          next = { shape: current.shape, color: current.color, isBonus: current.isBonus };
-          const sw = spawnPiece(old);
-          if (isValid(board, sw)) { current = sw; lastDrop = performance.now(); swapsUsed++; swapSound(); sync(); } // 🔊
-          else { next = old; }
+          doHardDrop(); e.preventDefault(); e.stopPropagation(); break;
+        case "Shift":
+          swapPiece();
           e.preventDefault(); e.stopPropagation(); break;
+      }
+    }
+
+    /* ── Canvas swipe/tap gesture handler ── */
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    let touchMoved = false;
+
+    function onTouchStart(e: TouchEvent) {
+      e.preventDefault();
+      const t = e.touches[0];
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+      touchStartTime = performance.now();
+      touchMoved = false;
+    }
+    function onTouchMove(e: TouchEvent) {
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - touchStartX;
+      const dy = t.clientY - touchStartY;
+      // Threshold for a swipe: 30px
+      if (Math.abs(dx) > 30 || Math.abs(dy) > 30) {
+        touchMoved = true;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          // Horizontal swipe
+          if (dx > 0) { moveRight(); } else { moveLeft(); }
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+        } else if (dy > 0) {
+          // Swipe down → soft drop
+          softDrop();
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+        } else {
+          // Swipe up → swap piece
+          swapPiece();
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+        }
+      }
+    }
+    function onTouchEnd(e: TouchEvent) {
+      e.preventDefault();
+      const elapsed = performance.now() - touchStartTime;
+      if (!touchMoved) {
+        // Tap (short) → rotate, long press → hard drop
+        if (elapsed < 300) {
+          rotatePiece();
+        } else {
+          doHardDrop();
         }
       }
     }
 
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
+
     document.addEventListener("keydown", onKey, true);
     draw();
     rafId = requestAnimationFrame(loop);
-    return () => { document.removeEventListener("keydown", onKey, true); cancelAnimationFrame(rafId); };
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      cancelAnimationFrame(rafId);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+    };
   }, []);
 
   const hearts = useCallback((n: number) => {
@@ -734,6 +848,28 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         </div>
       </div>
 
+      {/* ── MOBILE STATS BAR (visible only on mobile, shows data hidden panels had) ── */}
+      {IS_TOUCH && (
+        <div className="mobile-stats-bar">
+          <div className="mobile-stat">
+            <span className="mobile-stat-label">Lines</span>
+            <span className="mobile-stat-value">{display.lines}</span>
+          </div>
+          <div className="mobile-stat">
+            <span className="mobile-stat-label">Lives</span>
+            <span className="mobile-stat-value">{hearts(display.lives)}</span>
+          </div>
+          <div className="mobile-stat">
+            <span className="mobile-stat-label">Swap</span>
+            <span className="mobile-stat-value">{swapsLeft}/{display.swapsMax}</span>
+          </div>
+          <div className="mobile-stat">
+            <span className="mobile-stat-label">Next</span>
+            <canvas ref={previewRef} width={100} height={80} className="preview-canvas" style={{ width: 50, height: 40 }} />
+          </div>
+        </div>
+      )}
+
       {/* ── LEFT PANEL: Swap → Lines → Restart ── */}
       <div className="left-panel">
         <div className="sidebar-section">
@@ -762,18 +898,22 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         <div className="sidebar-section"><h3>Lives</h3><p className="lives-display">{hearts(display.lives)}</p></div>
         <div className="sidebar-section">
           <h3>Next</h3>
-          <canvas ref={previewRef} width={100} height={80} className="preview-canvas" />
+          {/* On desktop, preview renders here; on mobile it's in mobile-stats-bar */}
+          {!IS_TOUCH && <canvas ref={previewRef} width={100} height={80} className="preview-canvas" />}
         </div>
         <HighScoresPanel />
       </div>
 
-      {/* ── BOTTOM: Controls guide ── */}
+      {/* ── BOTTOM: Controls guide (desktop) + Mobile controls (touch) ── */}
       <div className="bottom-bar">
         <div className="controls-hint">
           <span>← → Move</span><span>↑ Rotate</span><span>↓ Soft Drop</span>
           <span>Space Hard Drop</span><span>⇧ Shift Swap</span><span>Esc Pause</span>
         </div>
       </div>
+
+      {/* ── MOBILE TOUCH CONTROLS ── */}
+      {IS_TOUCH && <MobileControls actionsRef={gameActionsRef} />}
     </div>
   );
 }
