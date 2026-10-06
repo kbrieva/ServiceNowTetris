@@ -5,6 +5,10 @@ declare global {
         namespace Internal {
             interface Keys extends KeysRegistry {
                 explicit: {
+                    '0fea8e780fb34390030a4ff800d1b2cc': {
+                        table: 'sys_security_acl'
+                        id: '0fea8e780fb34390030a4ff800d1b2cc'
+                    }
                     'acl-scores-create': {
                         table: 'sys_security_acl'
                         id: '1961134f312d419a91db15ae75c73ded'
@@ -16,6 +20,10 @@ declare global {
                     bom_json: {
                         table: 'sys_module'
                         id: '55104091e08142f4b1c2529b87f29115'
+                    }
+                    e8990e740fb34390030a4ff800d1b2f9: {
+                        table: 'sys_security_acl'
+                        id: 'e8990e740fb34390030a4ff800d1b2f9'
                     }
                     package_json: {
                         table: 'sys_module'
@@ -309,6 +317,19 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_security_acl_role'
+                        id: '96fa86b80fb34390030a4ff800d1b223'
+                        key: {
+                            sys_security_acl: '0fea8e780fb34390030a4ff800d1b2cc'
+                            sys_user_role: {
+                                id: 'b0593b350a0a0aa7001d689e4542dc28'
+                                key: {
+                                    name: 'public'
+                                }
+                            }
+                        }
+                    },
+                    {
                         table: 'sys_ui_section'
                         id: '97fa9d88446340d08d86814a7912b673'
                         key: {
@@ -499,6 +520,19 @@ declare global {
                         key: {
                             name: 'u_tetris_high_scores'
                             element: 'u_score'
+                        }
+                    },
+                    {
+                        table: 'sys_security_acl_role'
+                        id: 'f3b986f40fb34390030a4ff800d1b28b'
+                        key: {
+                            sys_security_acl: 'e8990e740fb34390030a4ff800d1b2f9'
+                            sys_user_role: {
+                                id: 'b0593b350a0a0aa7001d689e4542dc28'
+                                key: {
+                                    name: 'public'
+                                }
+                            }
                         }
                     },
                     {

@@ -68,6 +68,7 @@ export const BONUS_PIECE_DEFS: Record<string, PieceDef> = {
 const PIECE_NAMES = Object.keys(PIECE_DEFS);
 const BONUS_NAMES = Object.keys(BONUS_PIECE_DEFS);
 const LINE_SCORES = [0, 100, 300, 500, 800];
+export const BOARD_CLEAR_BONUS = 1000;
 
 /* ── Safe board constructors (no Array.from — avoids Prototype.js conflict) ── */
 
@@ -235,6 +236,29 @@ export function lockPiece(board: Board, piece: ActivePiece): Board {
     }
   }
   return nb;
+}
+
+/** Return indices of all completely full rows (before removal). */
+export function findFullRows(board: Board): number[] {
+  const rows: number[] = [];
+  for (let r = 0; r < board.length; r++) {
+    let full = true;
+    for (let c = 0; c < board[r].length; c++) {
+      if (!board[r][c]) { full = false; break; }
+    }
+    if (full) rows.push(r);
+  }
+  return rows;
+}
+
+/** Check if the entire board is empty (all cells null). */
+export function isBoardEmpty(board: Board): boolean {
+  for (let r = 0; r < board.length; r++) {
+    for (let c = 0; c < board[r].length; c++) {
+      if (board[r][c]) return false;
+    }
+  }
+  return true;
 }
 
 export function clearLines(board: Board): { board: Board; cleared: number } {

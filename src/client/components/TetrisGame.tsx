@@ -3,14 +3,14 @@ import {
   COLS, ROWS, BLOCK_SIZE, Board, ActivePiece, PieceDef,
   createBoard, randomPieceDef, spawnPiece, isValid, tryRotate,
   lockPiece, clearLines, getSpeed, calcScore, calcComboBonus,
-  ghostY, MILESTONES,
+  ghostY, MILESTONES, findFullRows, isBoardEmpty, BOARD_CLEAR_BONUS,
 } from "../game/engine";
 import HighScoresPanel from "./HighScoresPanel";
 import {
   pieceLock, pieceMove, pieceRotate, hardDropSound,
   lineClear1, lineClear2, lineClear3, lineClear4,
   comboSound, milestoneSound, deathSound, gameOverSound,
-  levelUpSound, swapSound,
+  levelUpSound, swapSound, boardClearSound,
 } from "../game/sounds";
 import "./TetrisGame.css";
 
@@ -18,6 +18,7 @@ const PREVIEW_BLOCK = 20;
 const INITIAL_LIVES = 3;
 const TOAST_MS = 1800;
 const DEATH_MS = 2200;
+const BOARD_CLEAR_EFFECT_DUR = 800;
 
 interface Props {
   playerName: string;
@@ -26,6 +27,21 @@ interface Props {
 }
 
 interface Toast { text: string; sub: string; start: number; dur: number; }
+
+interface PendingClear {
+  rows: number[];
+  count: number;
+  start: number;
+  dur: number;
+}
+
+interface BoardClearEffect {
+  start: number;
+  level: number;
+}
+
+/* ── Line clear durations by count ── */
+const CLEAR_DURATIONS: Record<number, number> = { 1: 150, 2: 200, 3: 300, 4: 400 };
 
 /* ── Canvas draw helpers ── */
 
@@ -120,6 +136,213 @@ function renderDeath(ctx: CanvasRenderingContext2D, w: number, h: number, t: Toa
   ctx.restore();
 }
 
+/* ── Line clear visual effects ── */
+
+const RAINBOW = ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#8B00FF"];
+
+/** 1-line: quick white flash across the cleared row */
+function renderClear1(ctx: CanvasRenderingContext2D, rows: number[], elapsed: number, dur: number) {
+  const t = elapsed / dur;
+  const a = t < 0.5 ? t * 2 : 2 * (1 - t);
+  ctx.save();
+  ctx.globalAlpha = a * 0.85;
+  ctx.fillStyle = "#FFFFFF";
+  for (let i = 0; i < rows.length; i++) {
+    ctx.fillRect(0, rows[i] * BLOCK_SIZE, COLS * BLOCK_SIZE, BLOCK_SIZE);
+  }
+  ctx.restore();
+}
+
+/** 2-line: blue wave sweep from left to right */
+function renderClear2(ctx: CanvasRenderingContext2D, rows: number[], elapsed: number, dur: number) {
+  const t = elapsed / dur;
+  const sweepX = t * (COLS + 2) * BLOCK_SIZE;
+  ctx.save();
+  for (let i = 0; i < rows.length; i++) {
+    const y = rows[i] * BLOCK_SIZE;
+    const grad = ctx.createLinearGradient(sweepX - 3 * BLOCK_SIZE, y, sweepX, y);
+    grad.addColorStop(0, "rgba(86,180,233,0)");
+    grad.addColorStop(0.5, "rgba(86,180,233,0.8)");
+    grad.addColorStop(1, "rgba(86,180,233,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y, COLS * BLOCK_SIZE, BLOCK_SIZE);
+  }
+  ctx.restore();
+}
+
+/** 3-line: golden shimmer — rows pulse gold twice */
+function renderClear3(ctx: CanvasRenderingContext2D, rows: number[], elapsed: number, dur: number) {
+  const t = elapsed / dur;
+  // Two pulses: sine wave that cycles twice in the duration
+  const pulse = Math.abs(Math.sin(t * Math.PI * 2));
+  ctx.save();
+  ctx.globalAlpha = pulse * 0.75;
+  ctx.fillStyle = "#FFD700";
+  for (let i = 0; i < rows.length; i++) {
+    ctx.fillRect(0, rows[i] * BLOCK_SIZE, COLS * BLOCK_SIZE, BLOCK_SIZE);
+  }
+  // Add shimmer highlights
+  ctx.globalAlpha = pulse * 0.4;
+  ctx.fillStyle = "#FFF8DC";
+  for (let i = 0; i < rows.length; i++) {
+    const y = rows[i] * BLOCK_SIZE;
+    for (let c = 0; c < COLS; c++) {
+      const shimmer = Math.sin((c / COLS) * Math.PI * 4 + t * 12);
+      if (shimmer > 0.3) {
+        ctx.globalAlpha = shimmer * pulse * 0.5;
+        ctx.fillRect(c * BLOCK_SIZE, y, BLOCK_SIZE - 1, BLOCK_SIZE);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+/** 4-line (TETRIS!): rainbow explosion — rows cycle through colors + screen shake */
+function renderClear4(
+  ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
+  rows: number[], elapsed: number, dur: number,
+) {
+  const t = elapsed / dur;
+  // Screen shake
+  const shakeIntensity = (1 - t) * 4;
+  const shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
+  const shakeY = (Math.random() - 0.5) * shakeIntensity * 2;
+  canvas.style.transform = `translate(${shakeX}px, ${shakeY}px)`;
+
+  ctx.save();
+  // Rainbow cycling per block
+  const colorIdx = Math.floor(elapsed / 30) % RAINBOW.length;
+  for (let i = 0; i < rows.length; i++) {
+    const y = rows[i] * BLOCK_SIZE;
+    for (let c = 0; c < COLS; c++) {
+      const ci = (colorIdx + c + i * 3) % RAINBOW.length;
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = RAINBOW[ci];
+      ctx.fillRect(c * BLOCK_SIZE, y, BLOCK_SIZE - 1, BLOCK_SIZE);
+    }
+  }
+  // Flash overlay on the whole board
+  const flashA = t < 0.15 ? (0.15 - t) / 0.15 * 0.4 : 0;
+  if (flashA > 0) {
+    ctx.globalAlpha = flashA;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.restore();
+
+  // Reset shake when effect ends
+  if (t >= 1) {
+    canvas.style.transform = "";
+  }
+}
+
+/* ── Board clear visual effects (per level range) ── */
+
+/** Levels 1-3: White screen flash */
+function renderBoardClearLow(ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) {
+  const dur = BOARD_CLEAR_EFFECT_DUR;
+  const t = elapsed / dur;
+  // Bright white flash that fades out
+  const a = t < 0.2 ? t / 0.2 : Math.max(0, 1 - (t - 0.2) / 0.8);
+  ctx.save();
+  ctx.globalAlpha = a * 0.6;
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+}
+
+/** Levels 4-6: Golden pulse rings expanding from center */
+function renderBoardClearMid(ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) {
+  const dur = BOARD_CLEAR_EFFECT_DUR;
+  const t = elapsed / dur;
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxR = Math.sqrt(cx * cx + cy * cy);
+  ctx.save();
+  // 3 expanding rings staggered
+  for (let ring = 0; ring < 3; ring++) {
+    const rt = t - ring * 0.15;
+    if (rt < 0 || rt > 1) continue;
+    const radius = rt * maxR;
+    const a = Math.max(0, 1 - rt);
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = "#FFD700";
+    ctx.lineWidth = 6 - ring * 1.5;
+    ctx.globalAlpha = a * 0.7;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Levels 7-9: Cyan lightning bolts radiating from center */
+function renderBoardClearHigh(ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) {
+  const dur = BOARD_CLEAR_EFFECT_DUR;
+  const t = elapsed / dur;
+  const cx = w / 2;
+  const cy = h / 2;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - t) * 0.8;
+  ctx.strokeStyle = "#00FFFF";
+  ctx.lineWidth = 2;
+  ctx.shadowColor = "#00FFFF";
+  ctx.shadowBlur = 10;
+  // 8 lightning bolts
+  const numBolts = 8;
+  for (let b = 0; b < numBolts; b++) {
+    const angle = (b / numBolts) * Math.PI * 2;
+    const length = t * Math.max(w, h) * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    const segments = 6;
+    for (let s = 1; s <= segments; s++) {
+      const frac = s / segments;
+      const jitter = (s < segments) ? (Math.random() - 0.5) * 20 : 0;
+      const px = cx + Math.cos(angle) * length * frac + Math.sin(angle) * jitter;
+      const py = cy + Math.sin(angle) * length * frac - Math.cos(angle) * jitter;
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Level 10: Full rainbow spiral + screen flash */
+function renderBoardClearMax(ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) {
+  const dur = BOARD_CLEAR_EFFECT_DUR;
+  const t = elapsed / dur;
+  const cx = w / 2;
+  const cy = h / 2;
+
+  // Screen flash at start
+  if (t < 0.2) {
+    ctx.save();
+    ctx.globalAlpha = (0.2 - t) / 0.2 * 0.5;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  // Rainbow spiral
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - t) * 0.7;
+  const spiralTurns = 3 + t * 4;
+  const maxR = Math.max(w, h) * 0.6 * t;
+  ctx.lineWidth = 4;
+  for (let i = 0; i < 100; i++) {
+    const frac = i / 100;
+    const angle = frac * spiralTurns * Math.PI * 2 + elapsed * 0.01;
+    const r = frac * maxR;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = RAINBOW[i % RAINBOW.length];
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 /* ── Component ── */
 
 export default function TetrisGame({ playerName, onGameOver, onRestart }: Props) {
@@ -154,6 +377,12 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
     let milestoneToast: Toast | null = null;  // top area
     let comboToast: Toast | null = null;      // bottom area
     let deathToast: Toast | null = null;      // center — big 💔
+
+    // Two-phase line clear animation
+    let pendingClear: PendingClear | null = null;
+
+    // Board clear (perfect clear) effect
+    let boardClearEffect: BoardClearEffect | null = null;
 
     function sync() {
       setDisplay({ score, level, lines, lives, paused, swapsUsed, swapsMax: level, combo });
@@ -199,10 +428,9 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
       if (level !== prevLevel) { swapsUsed = 0; prevLevel = level; }
     }
 
-    function lock() {
-      if (!current) return;
-      board = lockPiece(board, current);
-      pieceLock(); // 🔊 piece lock click
+    /** Phase 2: Actually clear the rows, award points, and spawn next piece.
+     *  Called after the line clear animation finishes. */
+    function finishClear(pc: PendingClear) {
       const res = clearLines(board);
       board = res.board;
 
@@ -232,12 +460,62 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         }
         // Milestone toast (top) — fires independently
         checkMilestone();
+
+        // ── Board clear (PERFECT CLEAR) detection ──
+        if (isBoardEmpty(board)) {
+          const bonus = BOARD_CLEAR_BONUS * level;
+          score += bonus;
+          boardClearSound(); // 🔊 perfect clear fanfare
+          boardClearEffect = { start: performance.now(), level };
+          // Toast varies by level
+          let emoji = "⭐";
+          if (level >= 4 && level <= 6) emoji = "🌟";
+          else if (level >= 7 && level <= 9) emoji = "💫";
+          else if (level >= 10) emoji = "🔥";
+          milestoneToast = {
+            text: emoji + " PERFECT CLEAR",
+            sub: "+" + bonus.toLocaleString() + " bonus!",
+            start: performance.now(), dur: TOAST_MS + 600,
+          };
+        }
       } else {
         combo = 0;
       }
       current = null;
       sync();
       spawn();
+    }
+
+    /** Phase 1 of lock: lock piece onto board, detect full rows, start animation.
+     *  If no rows to clear, immediately proceed to scoring + spawn. */
+    function lock() {
+      if (!current) return;
+      board = lockPiece(board, current);
+      pieceLock(); // 🔊 piece lock click
+
+      // Detect full rows BEFORE clearing
+      const fullRows = findFullRows(board);
+
+      if (fullRows.length > 0) {
+        // Start line clear animation phase
+        const dur = CLEAR_DURATIONS[fullRows.length] || 200;
+        pendingClear = {
+          rows: fullRows,
+          count: fullRows.length,
+          start: performance.now(),
+          dur,
+        };
+        // Remove current piece reference so it's not drawn as active
+        current = null;
+        sync();
+        // Don't clear or spawn yet — the game loop will call finishClear after animation
+      } else {
+        // No lines to clear — proceed immediately
+        combo = 0;
+        current = null;
+        sync();
+        spawn();
+      }
     }
 
     function hardDrop() {
@@ -272,8 +550,44 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
               fn(ctx, current.x + c, current.y + r, current.color, BLOCK_SIZE);
       }
 
-      // ── Toast overlays (3 independent channels) ──
       const now = performance.now();
+
+      // ── Line clear effect overlay ──
+      if (pendingClear) {
+        const el = now - pendingClear.start;
+        if (el < pendingClear.dur) {
+          if (pendingClear.count === 1) {
+            renderClear1(ctx, pendingClear.rows, el, pendingClear.dur);
+          } else if (pendingClear.count === 2) {
+            renderClear2(ctx, pendingClear.rows, el, pendingClear.dur);
+          } else if (pendingClear.count === 3) {
+            renderClear3(ctx, pendingClear.rows, el, pendingClear.dur);
+          } else {
+            renderClear4(ctx, canvas, pendingClear.rows, el, pendingClear.dur);
+          }
+        }
+      }
+
+      // ── Board clear effect overlay ──
+      if (boardClearEffect) {
+        const el = now - boardClearEffect.start;
+        if (el < BOARD_CLEAR_EFFECT_DUR) {
+          const lvl = boardClearEffect.level;
+          if (lvl >= 10) {
+            renderBoardClearMax(ctx, W, H, el);
+          } else if (lvl >= 7) {
+            renderBoardClearHigh(ctx, W, H, el);
+          } else if (lvl >= 4) {
+            renderBoardClearMid(ctx, W, H, el);
+          } else {
+            renderBoardClearLow(ctx, W, H, el);
+          }
+        } else {
+          boardClearEffect = null;
+        }
+      }
+
+      // ── Toast overlays (3 independent channels) ──
 
       // Milestone — top third of board
       if (milestoneToast && now - milestoneToast.start < milestoneToast.dur)
@@ -315,6 +629,24 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         return;
       }
       if (paused) { draw(); rafId = requestAnimationFrame(loop); return; }
+
+      // ── Check if a pending line clear animation has finished ──
+      if (pendingClear) {
+        const el = performance.now() - pendingClear.start;
+        if (el >= pendingClear.dur) {
+          // Reset shake transform in case it was a 4-line clear
+          canvas.style.transform = "";
+          const pc = pendingClear;
+          pendingClear = null;
+          finishClear(pc);
+          lastDrop = performance.now();
+        }
+        // During animation, just keep drawing, don't drop or process input gravity
+        draw();
+        rafId = requestAnimationFrame(loop);
+        return;
+      }
+
       if (!current) spawn();
       if (current && time - lastDrop > getSpeed(level)) {
         if (isValid(board, current, 0, 1)) current.y++;
@@ -336,7 +668,7 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
         if (!over) togglePause();
         e.preventDefault(); e.stopPropagation(); return;
       }
-      if (over || paused || !current) return;
+      if (over || paused || !current || pendingClear) return;
       switch (e.key) {
         case "ArrowLeft":
           if (isValid(board, current, -1, 0)) { current.x--; pieceMove(); } // 🔊
