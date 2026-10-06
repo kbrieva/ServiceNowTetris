@@ -1,14 +1,29 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import {
   COLS, ROWS, BLOCK_SIZE, Board, ActivePiece, PieceDef,
-  createBoard, randomPieceDef, spawnPiece, isValid, rotate,
-  lockPiece, clearLines, getSpeed, calcScore, ghostY,
+  createBoard, randomPieceDef, spawnPiece, isValid, tryRotate,
+  lockPiece, clearLines, getSpeed, calcScore, calcComboBonus,
+  ghostY, MILESTONES, findFullRows, isBoardEmpty, BOARD_CLEAR_BONUS,
 } from "../game/engine";
 import HighScoresPanel from "./HighScoresPanel";
+import MobileControls, { GameActions } from "./MobileControls";
+import {
+  pieceLock, pieceMove, pieceRotate, hardDropSound,
+  lineClear1, lineClear2, lineClear3, lineClear4,
+  comboSound, milestoneSound, deathSound, gameOverSound,
+  levelUpSound, swapSound, boardClearSound,
+} from "../game/sounds";
 import "./TetrisGame.css";
 
 const PREVIEW_BLOCK = 20;
 const INITIAL_LIVES = 3;
+const TOAST_MS = 1800;
+const DEATH_MS = 2200;
+const BOARD_CLEAR_EFFECT_DUR = 800;
+
+/* Detect touch device */
+const IS_TOUCH = typeof window !== "undefined" &&
+  ("ontouchstart" in window || navigator.maxTouchPoints > 0);
 
 interface Props {
   playerName: string;
@@ -16,62 +31,321 @@ interface Props {
   onRestart: () => void;
 }
 
-/* ── Drawing helpers ── */
+interface Toast { text: string; sub: string; start: number; dur: number; }
 
-function drawBlock(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, color: string, size: number,
-) {
+interface PendingClear {
+  rows: number[];
+  count: number;
+  start: number;
+  dur: number;
+}
+
+interface BoardClearEffect {
+  start: number;
+  level: number;
+}
+
+/* ── Line clear durations by count ── */
+const CLEAR_DURATIONS: Record<number, number> = { 1: 150, 2: 200, 3: 300, 4: 400 };
+
+/* ── Canvas draw helpers ── */
+
+function drawBlock(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, s: number) {
   ctx.fillStyle = color;
-  ctx.fillRect(x * size, y * size, size - 1, size - 1);
+  ctx.fillRect(x * s, y * s, s - 1, s - 1);
   ctx.fillStyle = "rgba(255,255,255,0.18)";
-  ctx.fillRect(x * size, y * size, size - 1, 3);
-  ctx.fillRect(x * size, y * size, 3, size - 1);
+  ctx.fillRect(x * s, y * s, s - 1, 3);
+  ctx.fillRect(x * s, y * s, 3, s - 1);
   ctx.fillStyle = "rgba(0,0,0,0.15)";
-  ctx.fillRect(x * size + size - 4, y * size, 3, size - 1);
-  ctx.fillRect(x * size, y * size + size - 4, size - 1, 3);
+  ctx.fillRect(x * s + s - 4, y * s, 3, s - 1);
+  ctx.fillRect(x * s, y * s + s - 4, s - 1, 3);
 }
-
-function drawGhostBlock(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, color: string, size: number,
-) {
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.3;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x * size + 1, y * size + 1, size - 3, size - 3);
-  ctx.globalAlpha = 1;
+function drawGhost(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, s: number) {
+  ctx.strokeStyle = color; ctx.globalAlpha = 0.3; ctx.lineWidth = 2;
+  ctx.strokeRect(x * s + 1, y * s + 1, s - 3, s - 3); ctx.globalAlpha = 1;
 }
-
-function drawBonusBlock(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, color: string, size: number,
-) {
-  ctx.save();
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 12;
-  ctx.fillStyle = color;
-  ctx.fillRect(x * size, y * size, size - 1, size - 1);
-  ctx.restore();
+function drawBonus(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, s: number) {
+  ctx.save(); ctx.shadowColor = color; ctx.shadowBlur = 12;
+  ctx.fillStyle = color; ctx.fillRect(x * s, y * s, s - 1, s - 1); ctx.restore();
   ctx.fillStyle = "rgba(255,255,255,0.30)";
-  ctx.fillRect(x * size, y * size, size - 1, 3);
-  ctx.fillRect(x * size, y * size, 3, size - 1);
+  ctx.fillRect(x * s, y * s, s - 1, 3); ctx.fillRect(x * s, y * s, 3, s - 1);
   ctx.fillStyle = "rgba(0,0,0,0.10)";
-  ctx.fillRect(x * size + size - 4, y * size, 3, size - 1);
-  ctx.fillRect(x * size, y * size + size - 4, size - 1, 3);
+  ctx.fillRect(x * s + s - 4, y * s, 3, s - 1); ctx.fillRect(x * s, y * s + s - 4, s - 1, 3);
+}
+function drawPause(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#56B4E9"; ctx.font = "bold 36px 'Segoe UI',system-ui,sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("⏸  PAUSED", w / 2, h / 2 - 16);
+  ctx.fillStyle = "#aaa"; ctx.font = "16px 'Segoe UI',system-ui,sans-serif";
+  ctx.fillText("Press ESC to resume", w / 2, h / 2 + 24);
 }
 
-function drawPauseOverlay(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = "#56B4E9";
-  ctx.font = "bold 36px 'Segoe UI', system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("⏸  PAUSED", w / 2, h / 2 - 16);
+/** Generic toast renderer at a given Y center */
+function renderToast(
+  ctx: CanvasRenderingContext2D, w: number, yCenter: number,
+  t: Toast, now: number, mainColor: string, subColor: string, mainSize: number,
+) {
+  const el = now - t.start;
+  if (el > t.dur) return;
+  let a = 1;
+  if (el < 200) a = el / 200;
+  else if (el > t.dur - 400) a = (t.dur - el) / 400;
+  const drift = -(el / t.dur) * 30;
+  ctx.save();
+  ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.shadowColor = "#000"; ctx.shadowBlur = 6;
+  ctx.fillStyle = mainColor;
+  ctx.font = "bold " + mainSize + "px 'Segoe UI',system-ui,sans-serif";
+  ctx.fillText(t.text, w / 2, yCenter + drift);
+  if (t.sub) {
+    ctx.fillStyle = subColor;
+    ctx.font = "bold 15px 'Segoe UI',system-ui,sans-serif";
+    ctx.fillText(t.sub, w / 2, yCenter + mainSize + 4 + drift);
+  }
+  ctx.restore();
+}
+
+/** Death effect — big broken heart that pulses and fades */
+function renderDeath(ctx: CanvasRenderingContext2D, w: number, h: number, t: Toast, now: number) {
+  const el = now - t.start;
+  if (el > t.dur) return;
+  // Dark flash overlay
+  const flashA = el < 300 ? 0.4 * (1 - el / 300) : 0;
+  if (flashA > 0) {
+    ctx.save(); ctx.globalAlpha = flashA;
+    ctx.fillStyle = "#D55E00"; ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+  // Broken heart — scales up then settles, then fades out
+  let scale = 1;
+  if (el < 300) scale = 0.5 + 1.5 * (el / 300);      // burst from 0.5 → 2
+  else if (el < 600) scale = 2 - 0.6 * ((el - 300) / 300); // settle to 1.4
+  else scale = 1.4;
+  let a = 1;
+  if (el > t.dur - 600) a = (t.dur - el) / 600;
+  const drift = -(el / t.dur) * 20;
+  ctx.save();
+  ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "bold " + Math.round(48 * scale) + "px 'Segoe UI',system-ui,sans-serif";
+  ctx.shadowColor = "#D55E00"; ctx.shadowBlur = 20;
+  ctx.fillStyle = "#D55E00";
+  ctx.fillText("💔", w / 2, h / 2 - 20 + drift);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 22px 'Segoe UI',system-ui,sans-serif";
+  ctx.fillText(t.text, w / 2, h / 2 + 30 + drift);
   ctx.fillStyle = "#aaa";
-  ctx.font = "16px 'Segoe UI', system-ui, sans-serif";
-  ctx.fillText("Press ESC to resume", w / 2, h / 2 + 24);
+  ctx.font = "15px 'Segoe UI',system-ui,sans-serif";
+  ctx.fillText(t.sub, w / 2, h / 2 + 56 + drift);
+  ctx.restore();
+}
+
+/* ── Line clear visual effects ── */
+
+const RAINBOW = ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#8B00FF"];
+
+/** 1-line: quick white flash across the cleared row */
+function renderClear1(ctx: CanvasRenderingContext2D, rows: number[], elapsed: number, dur: number) {
+  const t = elapsed / dur;
+  const a = t < 0.5 ? t * 2 : 2 * (1 - t);
+  ctx.save();
+  ctx.globalAlpha = a * 0.85;
+  ctx.fillStyle = "#FFFFFF";
+  for (let i = 0; i < rows.length; i++) {
+    ctx.fillRect(0, rows[i] * BLOCK_SIZE, COLS * BLOCK_SIZE, BLOCK_SIZE);
+  }
+  ctx.restore();
+}
+
+/** 2-line: blue wave sweep from left to right */
+function renderClear2(ctx: CanvasRenderingContext2D, rows: number[], elapsed: number, dur: number) {
+  const t = elapsed / dur;
+  const sweepX = t * (COLS + 2) * BLOCK_SIZE;
+  ctx.save();
+  for (let i = 0; i < rows.length; i++) {
+    const y = rows[i] * BLOCK_SIZE;
+    const grad = ctx.createLinearGradient(sweepX - 3 * BLOCK_SIZE, y, sweepX, y);
+    grad.addColorStop(0, "rgba(86,180,233,0)");
+    grad.addColorStop(0.5, "rgba(86,180,233,0.8)");
+    grad.addColorStop(1, "rgba(86,180,233,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y, COLS * BLOCK_SIZE, BLOCK_SIZE);
+  }
+  ctx.restore();
+}
+
+/** 3-line: golden shimmer — rows pulse gold twice */
+function renderClear3(ctx: CanvasRenderingContext2D, rows: number[], elapsed: number, dur: number) {
+  const t = elapsed / dur;
+  // Two pulses: sine wave that cycles twice in the duration
+  const pulse = Math.abs(Math.sin(t * Math.PI * 2));
+  ctx.save();
+  ctx.globalAlpha = pulse * 0.75;
+  ctx.fillStyle = "#FFD700";
+  for (let i = 0; i < rows.length; i++) {
+    ctx.fillRect(0, rows[i] * BLOCK_SIZE, COLS * BLOCK_SIZE, BLOCK_SIZE);
+  }
+  // Add shimmer highlights
+  ctx.globalAlpha = pulse * 0.4;
+  ctx.fillStyle = "#FFF8DC";
+  for (let i = 0; i < rows.length; i++) {
+    const y = rows[i] * BLOCK_SIZE;
+    for (let c = 0; c < COLS; c++) {
+      const shimmer = Math.sin((c / COLS) * Math.PI * 4 + t * 12);
+      if (shimmer > 0.3) {
+        ctx.globalAlpha = shimmer * pulse * 0.5;
+        ctx.fillRect(c * BLOCK_SIZE, y, BLOCK_SIZE - 1, BLOCK_SIZE);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+/** 4-line (TETRIS!): rainbow explosion — rows cycle through colors + screen shake */
+function renderClear4(
+  ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
+  rows: number[], elapsed: number, dur: number,
+) {
+  const t = elapsed / dur;
+  // Screen shake
+  const shakeIntensity = (1 - t) * 4;
+  const shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
+  const shakeY = (Math.random() - 0.5) * shakeIntensity * 2;
+  canvas.style.transform = `translate(${shakeX}px, ${shakeY}px)`;
+
+  ctx.save();
+  // Rainbow cycling per block
+  const colorIdx = Math.floor(elapsed / 30) % RAINBOW.length;
+  for (let i = 0; i < rows.length; i++) {
+    const y = rows[i] * BLOCK_SIZE;
+    for (let c = 0; c < COLS; c++) {
+      const ci = (colorIdx + c + i * 3) % RAINBOW.length;
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = RAINBOW[ci];
+      ctx.fillRect(c * BLOCK_SIZE, y, BLOCK_SIZE - 1, BLOCK_SIZE);
+    }
+  }
+  // Flash overlay on the whole board
+  const flashA = t < 0.15 ? (0.15 - t) / 0.15 * 0.4 : 0;
+  if (flashA > 0) {
+    ctx.globalAlpha = flashA;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.restore();
+
+  // Reset shake when effect ends
+  if (t >= 1) {
+    canvas.style.transform = "";
+  }
+}
+
+/* ── Board clear visual effects (per level range) ── */
+
+/** Levels 1-3: White screen flash */
+function renderBoardClearLow(ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) {
+  const dur = BOARD_CLEAR_EFFECT_DUR;
+  const t = elapsed / dur;
+  // Bright white flash that fades out
+  const a = t < 0.2 ? t / 0.2 : Math.max(0, 1 - (t - 0.2) / 0.8);
+  ctx.save();
+  ctx.globalAlpha = a * 0.6;
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+}
+
+/** Levels 4-6: Golden pulse rings expanding from center */
+function renderBoardClearMid(ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) {
+  const dur = BOARD_CLEAR_EFFECT_DUR;
+  const t = elapsed / dur;
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxR = Math.sqrt(cx * cx + cy * cy);
+  ctx.save();
+  // 3 expanding rings staggered
+  for (let ring = 0; ring < 3; ring++) {
+    const rt = t - ring * 0.15;
+    if (rt < 0 || rt > 1) continue;
+    const radius = rt * maxR;
+    const a = Math.max(0, 1 - rt);
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = "#FFD700";
+    ctx.lineWidth = 6 - ring * 1.5;
+    ctx.globalAlpha = a * 0.7;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Levels 7-9: Cyan lightning bolts radiating from center */
+function renderBoardClearHigh(ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) {
+  const dur = BOARD_CLEAR_EFFECT_DUR;
+  const t = elapsed / dur;
+  const cx = w / 2;
+  const cy = h / 2;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - t) * 0.8;
+  ctx.strokeStyle = "#00FFFF";
+  ctx.lineWidth = 2;
+  ctx.shadowColor = "#00FFFF";
+  ctx.shadowBlur = 10;
+  // 8 lightning bolts
+  const numBolts = 8;
+  for (let b = 0; b < numBolts; b++) {
+    const angle = (b / numBolts) * Math.PI * 2;
+    const length = t * Math.max(w, h) * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    const segments = 6;
+    for (let s = 1; s <= segments; s++) {
+      const frac = s / segments;
+      const jitter = (s < segments) ? (Math.random() - 0.5) * 20 : 0;
+      const px = cx + Math.cos(angle) * length * frac + Math.sin(angle) * jitter;
+      const py = cy + Math.sin(angle) * length * frac - Math.cos(angle) * jitter;
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Level 10: Full rainbow spiral + screen flash */
+function renderBoardClearMax(ctx: CanvasRenderingContext2D, w: number, h: number, elapsed: number) {
+  const dur = BOARD_CLEAR_EFFECT_DUR;
+  const t = elapsed / dur;
+  const cx = w / 2;
+  const cy = h / 2;
+
+  // Screen flash at start
+  if (t < 0.2) {
+    ctx.save();
+    ctx.globalAlpha = (0.2 - t) / 0.2 * 0.5;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  // Rainbow spiral
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - t) * 0.7;
+  const spiralTurns = 3 + t * 4;
+  const maxR = Math.max(w, h) * 0.6 * t;
+  ctx.lineWidth = 4;
+  for (let i = 0; i < 100; i++) {
+    const frac = i / 100;
+    const angle = frac * spiralTurns * Math.PI * 2 + elapsed * 0.01;
+    const r = frac * maxR;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = RAINBOW[i % RAINBOW.length];
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /* ── Component ── */
@@ -83,9 +357,20 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
   const cbRef = useRef(onGameOver);
   cbRef.current = onGameOver;
 
+  /* ── Game actions ref — exposed to MobileControls and swipe handler ── */
+  const gameActionsRef = useRef<GameActions>({
+    moveLeft: () => {},
+    moveRight: () => {},
+    rotate: () => {},
+    softDrop: () => {},
+    hardDrop: () => {},
+    swap: () => {},
+    pause: () => {},
+  });
+
   const [display, setDisplay] = useState({
     score: 0, level: 1, lines: 0, lives: INITIAL_LIVES,
-    paused: false, swapsUsed: 0, swapsMax: 1,
+    paused: false, swapsUsed: 0, swapsMax: 1, combo: 0,
   });
 
   useEffect(() => {
@@ -93,30 +378,45 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
     const ctx = canvas.getContext("2d")!;
     const pCanvas = previewRef.current!;
     const pCtx = pCanvas.getContext("2d")!;
-
     if (containerRef.current) containerRef.current.focus();
 
     let board: Board = createBoard();
     let current: ActivePiece | null = null;
     let next: PieceDef = randomPieceDef();
-    let score = 0;
-    let level = 1;
-    let lines = 0;
-    let lives = INITIAL_LIVES;
-    let over = false;
-    let paused = false;
-    let lastDrop = performance.now();
-    let rafId = 0;
+    let score = 0, level = 1, lines = 0, lives = INITIAL_LIVES;
+    let over = false, paused = false;
+    let lastDrop = performance.now(), rafId = 0;
+    let swapsUsed = 0, prevLevel = 1;
+    let combo = 0, lastMilestoneShown = 0;
 
-    // Swap tracking: level = max swaps, resets when level changes
-    let swapsUsed = 0;
-    let prevLevel = 1;
+    // 3 independent toast channels — all can show at once
+    let milestoneToast: Toast | null = null;  // top area
+    let comboToast: Toast | null = null;      // bottom area
+    let deathToast: Toast | null = null;      // center — big 💔
 
-    function syncDisplay() {
-      setDisplay({
-        score, level, lines, lives, paused,
-        swapsUsed, swapsMax: level,
-      });
+    // Two-phase line clear animation
+    let pendingClear: PendingClear | null = null;
+
+    // Board clear (perfect clear) effect
+    let boardClearEffect: BoardClearEffect | null = null;
+
+    function sync() {
+      setDisplay({ score, level, lines, lives, paused, swapsUsed, swapsMax: level, combo });
+    }
+
+    function checkMilestone() {
+      for (let i = MILESTONES.length - 1; i >= 0; i--) {
+        if (lines >= MILESTONES[i].lines && MILESTONES[i].lines > lastMilestoneShown) {
+          lastMilestoneShown = MILESTONES[i].lines;
+          milestoneSound(); // 🔊 milestone fanfare
+          milestoneToast = {
+            text: MILESTONES[i].text,
+            sub: lines + " lines cleared!",
+            start: performance.now(), dur: TOAST_MS,
+          };
+          return;
+        }
+      }
     }
 
     function spawn() {
@@ -124,114 +424,294 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
       next = randomPieceDef();
       if (!isValid(board, piece)) {
         lives--;
-        syncDisplay();
+        deathSound(); // 🔊 life lost
+        // Trigger death effect
+        deathToast = {
+          text: "LIFE LOST",
+          sub: lives > 0 ? lives + " remaining" : "GAME OVER",
+          start: performance.now(), dur: DEATH_MS,
+        };
+        sync();
         if (lives <= 0) {
           over = true;
+          gameOverSound(); // 🔊 game over
           cbRef.current(score, level, lines);
           return;
         }
         board = createBoard();
       }
       current = piece;
-
-      // Reset swaps when level increases
-      if (level !== prevLevel) {
-        swapsUsed = 0;
-        prevLevel = level;
-      }
+      if (level !== prevLevel) { swapsUsed = 0; prevLevel = level; }
     }
 
-    function lock() {
-      if (!current) return;
-      board = lockPiece(board, current);
+    /** Phase 2: Actually clear the rows, award points, and spawn next piece.
+     *  Called after the line clear animation finishes. */
+    function finishClear(pc: PendingClear) {
       const res = clearLines(board);
       board = res.board;
+
       if (res.cleared > 0) {
+        // 🔊 line clear sounds — escalate 1→4
+        if (res.cleared === 1) lineClear1();
+        else if (res.cleared === 2) lineClear2();
+        else if (res.cleared === 3) lineClear3();
+        else lineClear4();
+
+        combo++;
+        const cb = calcComboBonus(combo, level);
+        score += calcScore(res.cleared, level) + cb;
         lines += res.cleared;
-        score += calcScore(res.cleared, level);
-        const newLevel = Math.min(10, Math.floor(lines / 10) + 1);
-        if (newLevel !== level) {
-          swapsUsed = 0;
-          prevLevel = newLevel;
+        const nl = Math.min(10, Math.floor(lines / 10) + 1);
+        if (nl !== level) { swapsUsed = 0; prevLevel = nl; levelUpSound(); } // 🔊 level up
+        level = nl;
+
+        // Combo toast (bottom) — independent from milestone
+        if (combo > 1) {
+          comboSound(combo); // 🔊 combo
+          comboToast = {
+            text: "🔥 COMBO x" + combo,
+            sub: "+" + cb + " bonus!",
+            start: performance.now(), dur: TOAST_MS,
+          };
         }
-        level = newLevel;
+        // Milestone toast (top) — fires independently
+        checkMilestone();
+
+        // ── Board clear (PERFECT CLEAR) detection ──
+        if (isBoardEmpty(board)) {
+          const bonus = BOARD_CLEAR_BONUS * level;
+          score += bonus;
+          boardClearSound(); // 🔊 perfect clear fanfare
+          boardClearEffect = { start: performance.now(), level };
+          // Toast varies by level
+          let emoji = "⭐";
+          if (level >= 4 && level <= 6) emoji = "🌟";
+          else if (level >= 7 && level <= 9) emoji = "💫";
+          else if (level >= 10) emoji = "🔥";
+          milestoneToast = {
+            text: emoji + " PERFECT CLEAR",
+            sub: "+" + bonus.toLocaleString() + " bonus!",
+            start: performance.now(), dur: TOAST_MS + 600,
+          };
+        }
+      } else {
+        combo = 0;
       }
       current = null;
-      syncDisplay();
+      sync();
       spawn();
     }
 
-    function hardDrop() {
+    /** Phase 1 of lock: lock piece onto board, detect full rows, start animation.
+     *  If no rows to clear, immediately proceed to scoring + spawn. */
+    function lock() {
       if (!current) return;
-      const gy = ghostY(board, current);
-      current.y = gy;
+      board = lockPiece(board, current);
+      pieceLock(); // 🔊 piece lock click
+
+      // Detect full rows BEFORE clearing
+      const fullRows = findFullRows(board);
+
+      if (fullRows.length > 0) {
+        // Start line clear animation phase
+        const dur = CLEAR_DURATIONS[fullRows.length] || 200;
+        pendingClear = {
+          rows: fullRows,
+          count: fullRows.length,
+          start: performance.now(),
+          dur,
+        };
+        // Remove current piece reference so it's not drawn as active
+        current = null;
+        sync();
+        // Don't clear or spawn yet — the game loop will call finishClear after animation
+      } else {
+        // No lines to clear — proceed immediately
+        combo = 0;
+        current = null;
+        sync();
+        spawn();
+      }
+    }
+
+    function hardDropFn() {
+      if (!current) return;
+      hardDropSound(); // 🔊 hard drop thud
+      current.y = ghostY(board, current);
       lock();
     }
 
+    /* ── Shared action functions (called by keyboard AND touch) ── */
+    function moveLeft() {
+      if (over || paused || !current || pendingClear) return;
+      if (isValid(board, current, -1, 0)) { current.x--; pieceMove(); }
+    }
+    function moveRight() {
+      if (over || paused || !current || pendingClear) return;
+      if (isValid(board, current, 1, 0)) { current.x++; pieceMove(); }
+    }
+    function rotatePiece() {
+      if (over || paused || !current || pendingClear) return;
+      const kick = tryRotate(board, current);
+      if (kick) { current.shape = kick.shape; current.x += kick.dx; current.y += kick.dy; pieceRotate(); }
+    }
+    function softDrop() {
+      if (over || paused || !current || pendingClear) return;
+      if (isValid(board, current, 0, 1)) { current.y++; lastDrop = performance.now(); }
+    }
+    function doHardDrop() {
+      if (over || paused || !current || pendingClear) return;
+      hardDropFn();
+    }
+    function swapPiece() {
+      if (over || paused || !current || pendingClear) return;
+      if (swapsUsed >= level) return;
+      const old = next;
+      next = { shape: current.shape, color: current.color, isBonus: current.isBonus };
+      const sw = spawnPiece(old);
+      if (isValid(board, sw)) { current = sw; lastDrop = performance.now(); swapsUsed++; swapSound(); sync(); }
+      else { next = old; }
+    }
+    function togglePause() {
+      if (over) return;
+      paused = !paused;
+      if (!paused) lastDrop = performance.now();
+      sync();
+    }
+
+    /* ── Expose actions to touch controls via ref ── */
+    gameActionsRef.current = {
+      moveLeft,
+      moveRight,
+      rotate: rotatePiece,
+      softDrop,
+      hardDrop: doHardDrop,
+      swap: swapPiece,
+      pause: togglePause,
+    };
+
     function draw() {
-      ctx.fillStyle = "#1a1a2e";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = "#2a2a4e";
-      ctx.lineWidth = 0.5;
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
+      const W = canvas.width, H = canvas.height;
+      ctx.fillStyle = "#1a1a2e"; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = "#2a2a4e"; ctx.lineWidth = 0.5;
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
           ctx.strokeRect(c * BLOCK_SIZE, r * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-        }
-      }
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
           if (board[r][c]) drawBlock(ctx, c, r, board[r][c]!, BLOCK_SIZE);
-        }
-      }
+
       if (current) {
         const gy = ghostY(board, current);
-        if (gy !== current.y) {
-          for (let r = 0; r < current.shape.length; r++) {
-            for (let c = 0; c < current.shape[r].length; c++) {
-              if (current.shape[r][c]) {
-                drawGhostBlock(ctx, current.x + c, gy + r, current.color, BLOCK_SIZE);
-              }
-            }
-          }
-        }
-        const blockFn = current.isBonus ? drawBonusBlock : drawBlock;
-        for (let r = 0; r < current.shape.length; r++) {
-          for (let c = 0; c < current.shape[r].length; c++) {
-            if (current.shape[r][c]) {
-              blockFn(ctx, current.x + c, current.y + r, current.color, BLOCK_SIZE);
-            }
+        if (gy !== current.y)
+          for (let r = 0; r < current.shape.length; r++)
+            for (let c = 0; c < current.shape[r].length; c++)
+              if (current.shape[r][c])
+                drawGhost(ctx, current.x + c, gy + r, current.color, BLOCK_SIZE);
+        const fn = current.isBonus ? drawBonus : drawBlock;
+        for (let r = 0; r < current.shape.length; r++)
+          for (let c = 0; c < current.shape[r].length; c++)
+            if (current.shape[r][c])
+              fn(ctx, current.x + c, current.y + r, current.color, BLOCK_SIZE);
+      }
+
+      const now = performance.now();
+
+      // ── Line clear effect overlay ──
+      if (pendingClear) {
+        const el = now - pendingClear.start;
+        if (el < pendingClear.dur) {
+          if (pendingClear.count === 1) {
+            renderClear1(ctx, pendingClear.rows, el, pendingClear.dur);
+          } else if (pendingClear.count === 2) {
+            renderClear2(ctx, pendingClear.rows, el, pendingClear.dur);
+          } else if (pendingClear.count === 3) {
+            renderClear3(ctx, pendingClear.rows, el, pendingClear.dur);
+          } else {
+            renderClear4(ctx, canvas, pendingClear.rows, el, pendingClear.dur);
           }
         }
       }
-      if (paused) drawPauseOverlay(ctx, canvas.width, canvas.height);
+
+      // ── Board clear effect overlay ──
+      if (boardClearEffect) {
+        const el = now - boardClearEffect.start;
+        if (el < BOARD_CLEAR_EFFECT_DUR) {
+          const lvl = boardClearEffect.level;
+          if (lvl >= 10) {
+            renderBoardClearMax(ctx, W, H, el);
+          } else if (lvl >= 7) {
+            renderBoardClearHigh(ctx, W, H, el);
+          } else if (lvl >= 4) {
+            renderBoardClearMid(ctx, W, H, el);
+          } else {
+            renderBoardClearLow(ctx, W, H, el);
+          }
+        } else {
+          boardClearEffect = null;
+        }
+      }
+
+      // ── Toast overlays (3 independent channels) ──
+
+      // Milestone — top third of board
+      if (milestoneToast && now - milestoneToast.start < milestoneToast.dur)
+        renderToast(ctx, W, H * 0.22, milestoneToast, now, "#56B4E9", "#88d0f0", 30);
+      else milestoneToast = null;
+
+      // Combo — lower third of board
+      if (comboToast && now - comboToast.start < comboToast.dur)
+        renderToast(ctx, W, H * 0.78, comboToast, now, "#F0E442", "#E69F00", 24);
+      else comboToast = null;
+
+      // Death — center, on top of everything
+      if (deathToast && now - deathToast.start < deathToast.dur)
+        renderDeath(ctx, W, H, deathToast, now);
+      else deathToast = null;
+
+      if (paused) drawPause(ctx, W, H);
 
       // Preview
-      pCtx.fillStyle = "#1a1a2e";
-      pCtx.fillRect(0, 0, pCanvas.width, pCanvas.height);
+      pCtx.fillStyle = "#1a1a2e"; pCtx.fillRect(0, 0, pCanvas.width, pCanvas.height);
       const ox = (pCanvas.width - next.shape[0].length * PREVIEW_BLOCK) / 2;
       const oy = (pCanvas.height - next.shape.length * PREVIEW_BLOCK) / 2;
-      for (let r = 0; r < next.shape.length; r++) {
-        for (let c = 0; c < next.shape[r].length; c++) {
+      for (let r = 0; r < next.shape.length; r++)
+        for (let c = 0; c < next.shape[r].length; c++)
           if (next.shape[r][c]) {
-            if (next.isBonus) {
-              pCtx.save();
-              pCtx.shadowColor = next.color;
-              pCtx.shadowBlur = 8;
-            }
+            if (next.isBonus) { pCtx.save(); pCtx.shadowColor = next.color; pCtx.shadowBlur = 8; }
             pCtx.fillStyle = next.color;
-            pCtx.fillRect(
-              ox + c * PREVIEW_BLOCK, oy + r * PREVIEW_BLOCK,
-              PREVIEW_BLOCK - 1, PREVIEW_BLOCK - 1,
-            );
+            pCtx.fillRect(ox + c * PREVIEW_BLOCK, oy + r * PREVIEW_BLOCK, PREVIEW_BLOCK - 1, PREVIEW_BLOCK - 1);
             if (next.isBonus) pCtx.restore();
           }
-        }
-      }
     }
 
     function loop(time: number) {
-      if (over) return;
+      if (over) {
+        // Keep drawing for a moment so death toast finishes
+        if (deathToast && performance.now() - deathToast.start < deathToast.dur) {
+          draw(); rafId = requestAnimationFrame(loop);
+        }
+        return;
+      }
       if (paused) { draw(); rafId = requestAnimationFrame(loop); return; }
+
+      // ── Check if a pending line clear animation has finished ──
+      if (pendingClear) {
+        const el = performance.now() - pendingClear.start;
+        if (el >= pendingClear.dur) {
+          // Reset shake transform in case it was a 4-line clear
+          canvas.style.transform = "";
+          const pc = pendingClear;
+          pendingClear = null;
+          finishClear(pc);
+          lastDrop = performance.now();
+        }
+        // During animation, just keep drawing, don't drop or process input gravity
+        draw();
+        rafId = requestAnimationFrame(loop);
+        return;
+      }
+
       if (!current) spawn();
       if (current && time - lastDrop > getSpeed(level)) {
         if (isValid(board, current, 0, 1)) current.y++;
@@ -242,60 +722,89 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
       rafId = requestAnimationFrame(loop);
     }
 
-    function togglePause() {
-      paused = !paused;
-      if (!paused) lastDrop = performance.now();
-      syncDisplay();
-    }
-
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (!over) togglePause();
-        e.preventDefault();
-        e.stopPropagation();
-        return;
+        togglePause();
+        e.preventDefault(); e.stopPropagation(); return;
       }
-      if (over || paused || !current) return;
+      if (over || paused || !current || pendingClear) return;
       switch (e.key) {
         case "ArrowLeft":
-          if (isValid(board, current, -1, 0)) current.x--;
+          moveLeft();
           e.preventDefault(); e.stopPropagation(); break;
         case "ArrowRight":
-          if (isValid(board, current, 1, 0)) current.x++;
+          moveRight();
           e.preventDefault(); e.stopPropagation(); break;
         case "ArrowDown":
-          if (isValid(board, current, 0, 1)) {
-            current.y++;
-            lastDrop = performance.now();
-          }
+          softDrop();
           e.preventDefault(); e.stopPropagation(); break;
-        case "ArrowUp": {
-          const rotated = rotate(current.shape);
-          const test: ActivePiece = { ...current, shape: rotated };
-          if (isValid(board, test)) current.shape = rotated;
+        case "ArrowUp":
+          rotatePiece();
           e.preventDefault(); e.stopPropagation(); break;
-        }
         case " ":
-          hardDrop();
+          doHardDrop(); e.preventDefault(); e.stopPropagation(); break;
+        case "Shift":
+          swapPiece();
           e.preventDefault(); e.stopPropagation(); break;
-        case "Shift": {
-          // Swap limited by level: level N = N swaps allowed
-          if (swapsUsed >= level) break;   // no swaps remaining
-          const oldNext = next;
-          next = { shape: current.shape, color: current.color, isBonus: current.isBonus };
-          const swapped = spawnPiece(oldNext);
-          if (isValid(board, swapped)) {
-            current = swapped;
-            lastDrop = performance.now();
-            swapsUsed++;
-            syncDisplay();
-          } else {
-            next = oldNext;               // revert if can't place
-          }
-          e.preventDefault(); e.stopPropagation(); break;
+      }
+    }
+
+    /* ── Canvas swipe/tap gesture handler ── */
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    let touchMoved = false;
+
+    function onTouchStart(e: TouchEvent) {
+      e.preventDefault();
+      const t = e.touches[0];
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+      touchStartTime = performance.now();
+      touchMoved = false;
+    }
+    function onTouchMove(e: TouchEvent) {
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - touchStartX;
+      const dy = t.clientY - touchStartY;
+      // Threshold for a swipe: 30px
+      if (Math.abs(dx) > 30 || Math.abs(dy) > 30) {
+        touchMoved = true;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          // Horizontal swipe
+          if (dx > 0) { moveRight(); } else { moveLeft(); }
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+        } else if (dy > 0) {
+          // Swipe down → soft drop
+          softDrop();
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+        } else {
+          // Swipe up → swap piece
+          swapPiece();
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
         }
       }
     }
+    function onTouchEnd(e: TouchEvent) {
+      e.preventDefault();
+      const elapsed = performance.now() - touchStartTime;
+      if (!touchMoved) {
+        // Tap (short) → rotate, long press → hard drop
+        if (elapsed < 300) {
+          rotatePiece();
+        } else {
+          doHardDrop();
+        }
+      }
+    }
+
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
 
     document.addEventListener("keydown", onKey, true);
     draw();
@@ -303,10 +812,13 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
     return () => {
       document.removeEventListener("keydown", onKey, true);
       cancelAnimationFrame(rafId);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
     };
   }, []);
 
-  const livesDisplay = useCallback((n: number) => {
+  const hearts = useCallback((n: number) => {
     let h = "";
     for (let i = 0; i < n; i++) h += "❤️";
     for (let i = n; i < INITIAL_LIVES; i++) h += "🖤";
@@ -317,60 +829,91 @@ export default function TetrisGame({ playerName, onGameOver, onRestart }: Props)
 
   return (
     <div className="tetris-container" ref={containerRef} tabIndex={0}>
-      <canvas
-        ref={canvasRef}
-        width={COLS * BLOCK_SIZE}
-        height={ROWS * BLOCK_SIZE}
-        className="tetris-canvas"
-      />
-      <div className="tetris-sidebar">
-        <div className="sidebar-section">
-          <h3>Player</h3>
-          <p className="player-name">{playerName}</p>
-        </div>
-        <div className="sidebar-section">
-          <h3>Lives</h3>
-          <p className="lives-display">{livesDisplay(display.lives)}</p>
-        </div>
-        <div className="sidebar-section">
-          <h3>Next</h3>
-          <canvas ref={previewRef} width={100} height={80} className="preview-canvas" />
-        </div>
+      {/* ── TOP BAR: Score | Combo | Level ── */}
+      <div className="top-bar">
         <div className="sidebar-section">
           <h3>Score</h3>
-          <p className="stat-value">{display.score.toLocaleString()}</p>
+          <p className="stat-value-lg">{display.score.toLocaleString()}</p>
+        </div>
+        <div className="sidebar-section">
+          <h3>🔥 Combo</h3>
+          <div className="combo-display">
+            <span className={display.combo > 0 ? "combo-active" : "combo-zero"}>x{display.combo}</span>
+            {display.combo > 1 && <span className="combo-bonus">+{(display.combo * 100 * display.level).toLocaleString()}</span>}
+          </div>
         </div>
         <div className="sidebar-section">
           <h3>Level</h3>
-          <p className="stat-value">{display.level}</p>
+          <p className="stat-value-lg">{display.level}</p>
+        </div>
+      </div>
+
+      {/* ── MOBILE STATS BAR (visible only on mobile, shows data hidden panels had) ── */}
+      {IS_TOUCH && (
+        <div className="mobile-stats-bar">
+          <div className="mobile-stat">
+            <span className="mobile-stat-label">Lines</span>
+            <span className="mobile-stat-value">{display.lines}</span>
+          </div>
+          <div className="mobile-stat">
+            <span className="mobile-stat-label">Lives</span>
+            <span className="mobile-stat-value">{hearts(display.lives)}</span>
+          </div>
+          <div className="mobile-stat">
+            <span className="mobile-stat-label">Swap</span>
+            <span className="mobile-stat-value">{swapsLeft}/{display.swapsMax}</span>
+          </div>
+          <div className="mobile-stat">
+            <span className="mobile-stat-label">Next</span>
+            <canvas ref={previewRef} width={100} height={80} className="preview-canvas" style={{ width: 50, height: 40 }} />
+          </div>
+        </div>
+      )}
+
+      {/* ── LEFT PANEL: Swap → Lines → Restart ── */}
+      <div className="left-panel">
+        <div className="sidebar-section">
+          <h3>⇧ Swap</h3>
+          <div className="swap-counter">
+            <span className={swapsLeft > 0 ? "swap-available" : "swap-empty"}>{swapsLeft}</span>
+            <span className="swap-label">/ {display.swapsMax}</span>
+          </div>
         </div>
         <div className="sidebar-section">
           <h3>Lines</h3>
           <p className="stat-value">{display.lines}</p>
         </div>
-        <div className="sidebar-section">
-          <h3>⇧ Swap</h3>
-          <div className="swap-counter">
-            <span className={swapsLeft > 0 ? "swap-available" : "swap-empty"}>
-              {swapsLeft}
-            </span>
-            <span className="swap-label">/ {display.swapsMax} left</span>
-          </div>
-        </div>
-        {display.paused && (
-          <div className="pause-badge">⏸ PAUSED</div>
-        )}
+        {display.paused && <div className="pause-badge">⏸ PAUSED</div>}
         <button className="restart-btn" onClick={onRestart}>⟳ Restart</button>
+      </div>
+
+      {/* ── CENTER: Game board ── */}
+      <div className="board-area">
+        <canvas ref={canvasRef} width={COLS * BLOCK_SIZE} height={ROWS * BLOCK_SIZE} className="tetris-canvas" />
+      </div>
+
+      {/* ── RIGHT PANEL: Player, Lives, Next, High Scores ── */}
+      <div className="right-panel">
+        <div className="sidebar-section"><h3>Player</h3><p className="player-name">{playerName}</p></div>
+        <div className="sidebar-section"><h3>Lives</h3><p className="lives-display">{hearts(display.lives)}</p></div>
+        <div className="sidebar-section">
+          <h3>Next</h3>
+          {/* On desktop, preview renders here; on mobile it's in mobile-stats-bar */}
+          {!IS_TOUCH && <canvas ref={previewRef} width={100} height={80} className="preview-canvas" />}
+        </div>
+        <HighScoresPanel />
+      </div>
+
+      {/* ── BOTTOM: Controls guide (desktop) + Mobile controls (touch) ── */}
+      <div className="bottom-bar">
         <div className="controls-hint">
-          <p>← → Move</p>
-          <p>↑ Rotate</p>
-          <p>↓ Soft Drop</p>
-          <p>Space Hard Drop</p>
-          <p>⇧ Shift Swap</p>
-          <p>Esc Pause</p>
+          <span>← → Move</span><span>↑ Rotate</span><span>↓ Soft Drop</span>
+          <span>Space Hard Drop</span><span>⇧ Shift Swap</span><span>Esc Pause</span>
         </div>
       </div>
-      <HighScoresPanel />
+
+      {/* ── MOBILE TOUCH CONTROLS ── */}
+      {IS_TOUCH && <MobileControls actionsRef={gameActionsRef} />}
     </div>
   );
 }

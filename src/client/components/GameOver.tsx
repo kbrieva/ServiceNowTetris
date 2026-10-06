@@ -6,20 +6,65 @@ interface Props {
   score: number;
   level: number;
   lines: number;
+  playerName: string;
   onRestart: () => void;
 }
 
-export default function GameOver({ score, level, lines, onRestart }: Props) {
+export default function GameOver({ score, level, lines, playerName, onRestart }: Props) {
   const [scores, setScores] = useState<HighScoreEntry[]>([]);
+  const [rank, setRank] = useState<number>(-1); // -1 = not loaded, 0 = not on board
 
   useEffect(() => {
-    getHighScores().then(setScores).catch(() => setScores([]));
+    getHighScores().then((list) => {
+      setScores(list);
+      // Find where this player's score lands
+      // Check from top — first entry whose score is <= ours (or same name+score)
+      let r = 0;
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].score === score && list[i].player_name === playerName) {
+          r = i + 1; // 1-indexed rank
+          break;
+        }
+      }
+      // If not found by exact match, compute where we'd rank
+      if (r === 0) {
+        for (let i = 0; i < list.length; i++) {
+          if (score >= list[i].score) { r = i + 1; break; }
+        }
+        if (r === 0 && list.length < 10) r = list.length + 1;
+      }
+      setRank(r);
+    }).catch(() => { setScores([]); setRank(0); });
   }, []);
+
+  const isTop1 = rank === 1;
+  const isTop10 = rank > 0 && rank <= 10;
 
   return (
     <div className="gameover-screen">
       <div className="gameover-card">
         <h1 className="gameover-title">GAME OVER</h1>
+
+        {/* ── Congratulations banner ── */}
+        {isTop1 && (
+          <div className="congrats-banner congrats-top1">
+            <span className="congrats-icon">👑</span>
+            <div className="congrats-text">
+              <strong>Congratulations, {playerName}!</strong>
+              <p>You are the #1 Top Scorer!</p>
+            </div>
+          </div>
+        )}
+        {!isTop1 && isTop10 && (
+          <div className="congrats-banner congrats-top10">
+            <span className="congrats-icon">🎉</span>
+            <div className="congrats-text">
+              <strong>Congratulations, {playerName}!</strong>
+              <p>You made it to the Top 10! (#{rank})</p>
+            </div>
+          </div>
+        )}
+
         <div className="gameover-stats">
           <div className="gameover-stat">
             <span>Score</span>
@@ -49,14 +94,17 @@ export default function GameOver({ score, level, lines, onRestart }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {scores.map((s, i) => (
-                  <tr key={i}>
-                    <td>{i + 1}</td>
-                    <td>{s.player_name}</td>
-                    <td>{s.score.toLocaleString()}</td>
-                    <td>{s.level}</td>
-                  </tr>
-                ))}
+                {scores.map((s, i) => {
+                  const isMe = s.score === score && s.player_name === playerName && i + 1 === rank;
+                  return (
+                    <tr key={i} className={isMe ? "highlight-me" : ""}>
+                      <td>{i + 1}</td>
+                      <td>{s.player_name}{isMe ? " ← You" : ""}</td>
+                      <td>{s.score.toLocaleString()}</td>
+                      <td>{s.level}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

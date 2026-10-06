@@ -68,6 +68,7 @@ export const BONUS_PIECE_DEFS: Record<string, PieceDef> = {
 const PIECE_NAMES = Object.keys(PIECE_DEFS);
 const BONUS_NAMES = Object.keys(BONUS_PIECE_DEFS);
 const LINE_SCORES = [0, 100, 300, 500, 800];
+export const BOARD_CLEAR_BONUS = 1000;
 
 /* ── Safe board constructors (no Array.from — avoids Prototype.js conflict) ── */
 
@@ -94,14 +95,44 @@ function cloneShape(s: Shape): Shape {
   return out;
 }
 
+/* ── Anti-repeat: no 3 consecutive identical pieces ── */
+const recentColors: string[] = [];   // tracks last 2 piece colors
+const MAX_REROLL = 5;                // safety cap to avoid infinite loop
+
+function wouldTriple(color: string): boolean {
+  return recentColors.length >= 2
+    && recentColors[recentColors.length - 1] === color
+    && recentColors[recentColors.length - 2] === color;
+}
+
+function pushHistory(color: string) {
+  recentColors.push(color);
+  if (recentColors.length > 2) recentColors.shift();
+}
+
 export function randomPieceDef(): PieceDef {
-  if (Math.random() < 0.15 && BONUS_NAMES.length > 0) {
-    const name = BONUS_NAMES[Math.floor(Math.random() * BONUS_NAMES.length)];
-    const def = BONUS_PIECE_DEFS[name];
-    return { shape: cloneShape(def.shape), color: def.color, isBonus: true };
+  for (let attempt = 0; attempt < MAX_REROLL; attempt++) {
+    // 15% bonus chance
+    if (Math.random() < 0.15 && BONUS_NAMES.length > 0) {
+      const name = BONUS_NAMES[Math.floor(Math.random() * BONUS_NAMES.length)];
+      const def = BONUS_PIECE_DEFS[name];
+      if (!wouldTriple(def.color) || attempt === MAX_REROLL - 1) {
+        pushHistory(def.color);
+        return { shape: cloneShape(def.shape), color: def.color, isBonus: true };
+      }
+      continue;
+    }
+    const name = PIECE_NAMES[Math.floor(Math.random() * PIECE_NAMES.length)];
+    const def = PIECE_DEFS[name];
+    if (!wouldTriple(def.color) || attempt === MAX_REROLL - 1) {
+      pushHistory(def.color);
+      return { shape: cloneShape(def.shape), color: def.color };
+    }
   }
-  const name = PIECE_NAMES[Math.floor(Math.random() * PIECE_NAMES.length)];
+  // Fallback (should never reach here due to MAX_REROLL - 1 guard)
+  const name = PIECE_NAMES[0];
   const def = PIECE_DEFS[name];
+  pushHistory(def.color);
   return { shape: cloneShape(def.shape), color: def.color };
 }
 
@@ -144,6 +175,52 @@ export function rotate(shape: Shape): Shape {
   return result;
 }
 
+/* ── Wall Kick Rotation ──────────────────────────────────────
+ *  When basic rotation collides with a wall or locked blocks,
+ *  try shifting the piece by a series of offsets (kicks).
+ *  The I piece uses wider kicks (±1, ±2) because it's 4 wide.
+ *  Other pieces use standard kicks (±1, then ±1 up).
+ * ──────────────────────────────────────────────────────────── */
+
+/** Standard wall kick offsets for T/S/Z/J/L and bonus pieces */
+const STANDARD_KICKS: [number, number][] = [
+  [0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1],
+];
+
+/** I-piece wall kick offsets — needs wider range */
+const I_KICKS: [number, number][] = [
+  [0, 0], [-1, 0], [1, 0], [-2, 0], [2, 0],
+  [0, -1], [-1, -1], [1, -1], [-2, -1], [2, -1],
+  [0, -2],
+];
+
+function isIPiece(shape: Shape): boolean {
+  // I piece is the only piece with a row of 4, or a column of 4
+  if (shape.length === 1 && shape[0].length === 4) return true;  // horizontal
+  if (shape.length === 4 && shape[0].length === 1) return true;  // vertical
+  return false;
+}
+
+/** Try to rotate a piece with wall kicks.
+ *  Returns { shape, dx, dy } if successful, or null if no valid position found. */
+export function tryRotate(
+  board: Board,
+  piece: ActivePiece,
+): { shape: Shape; dx: number; dy: number } | null {
+  const rotated = rotate(piece.shape);
+  const kicks = isIPiece(piece.shape) ? I_KICKS : STANDARD_KICKS;
+  const test: ActivePiece = { ...piece, shape: rotated };
+
+  for (let i = 0; i < kicks.length; i++) {
+    const dx = kicks[i][0];
+    const dy = kicks[i][1];
+    if (isValid(board, test, dx, dy)) {
+      return { shape: rotated, dx, dy };
+    }
+  }
+  return null; // no valid position found
+}
+
 export function lockPiece(board: Board, piece: ActivePiece): Board {
   const nb: Board = new Array(board.length);
   for (let i = 0; i < board.length; i++) {
@@ -159,6 +236,29 @@ export function lockPiece(board: Board, piece: ActivePiece): Board {
     }
   }
   return nb;
+}
+
+/** Return indices of all completely full rows (before removal). */
+export function findFullRows(board: Board): number[] {
+  const rows: number[] = [];
+  for (let r = 0; r < board.length; r++) {
+    let full = true;
+    for (let c = 0; c < board[r].length; c++) {
+      if (!board[r][c]) { full = false; break; }
+    }
+    if (full) rows.push(r);
+  }
+  return rows;
+}
+
+/** Check if the entire board is empty (all cells null). */
+export function isBoardEmpty(board: Board): boolean {
+  for (let r = 0; r < board.length; r++) {
+    for (let c = 0; c < board[r].length; c++) {
+      if (board[r][c]) return false;
+    }
+  }
+  return true;
 }
 
 export function clearLines(board: Board): { board: Board; cleared: number } {
@@ -184,6 +284,22 @@ export function getSpeed(level: number): number {
 export function calcScore(linesCleared: number, level: number): number {
   return (LINE_SCORES[linesCleared] || 0) * level;
 }
+
+/** Combo bonus: consecutive line clears earn escalating bonus, doubled per level.
+ *  Formula: comboCount × 100 × level
+ *  e.g. combo x3 at level 5 → 3 × 100 × 5 = 1,500 bonus */
+export function calcComboBonus(comboCount: number, level: number): number {
+  return comboCount * 100 * level;
+}
+
+/** Milestone messages based on total lines cleared. */
+export const MILESTONES: { lines: number; text: string }[] = [
+  { lines: 20,  text: "Good!" },
+  { lines: 40,  text: "Great!" },
+  { lines: 60,  text: "You're a Tetris Pro!" },
+  { lines: 100, text: "You're a Tetris God!" },
+  { lines: 150, text: "INSANE!" },
+];
 
 /** Compute the ghost-piece Y (where the piece would land). */
 export function ghostY(board: Board, piece: ActivePiece): number {
