@@ -20,3 +20,20 @@ html, body, #root {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   color: #e0e0e0;
 }
+
+/* ── Mobile: prevent scroll/zoom on game area ── */
+@media (max-width: 768px) {
+  html, body {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+  .app-root {
+    align-items: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
