@@ -200,3 +200,20 @@ export function swapSound(): void {
   tone(500, 0.04, "triangle", 0.2, 0);
   tone(700, 0.06, "triangle", 0.25, 0.04);
 }
+
+/** Board clear (PERFECT CLEAR) — epic ascending fanfare with shimmer */
+export function boardClearSound(): void {
+  // Big ascending arpeggio: C5 → E5 → G5 → C6 → E6 → G6
+  tone(523.25, 0.08, "triangle", 0.3, 0);
+  tone(659.25, 0.08, "triangle", 0.32, 0.07);
+  tone(783.99, 0.08, "triangle", 0.34, 0.14);
+  tone(1046.5, 0.1, "triangle", 0.36, 0.21);
+  tone(1318.5, 0.1, "triangle", 0.38, 0.28);
+  tone(1567.98, 0.15, "triangle", 0.4, 0.35);
+  // Sustained shimmer chord at the top
+  chord(1046.5, 1567.98, 0.3, "sine", 0.2, 0.4);
+  // Sparkle overtone
+  tone(2093.0, 0.2, "sine", 0.12, 0.45);
+  // Sub-bass rumble for weight
+  tone(261.63, 0.3, "sine", 0.15, 0.35);
+}
