@@ -11,6 +11,7 @@ interface GameResult {
   score: number;
   level: number;
   lines: number;
+  scoreSaved: boolean;
 }
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
     score: 0,
     level: 1,
     lines: 0,
+    scoreSaved: false,
   });
 
   const handleStart = useCallback((name: string) => {
@@ -29,9 +31,15 @@ export default function App() {
   }, []);
 
   const handleGameOver = useCallback(
-    (score: number, level: number, lines: number) => {
-      setResult({ score, level, lines });
-      saveScore(playerName, score, level).catch(() => {});
+    async (score: number, level: number, lines: number) => {
+      let scoreSaved = false;
+      try {
+        await saveScore(playerName, score, level);
+        scoreSaved = true;
+      } catch {
+        // The final score screen should remain available if saving fails.
+      }
+      setResult({ score, level, lines, scoreSaved });
       setScreen("gameover");
     },
     [playerName],
@@ -59,6 +67,7 @@ export default function App() {
           level={result.level}
           lines={result.lines}
           playerName={playerName}
+          scoreSaved={result.scoreSaved}
           onRestart={handleRestart}
         />
       )}

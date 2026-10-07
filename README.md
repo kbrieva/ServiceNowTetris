@@ -288,6 +288,7 @@ Floating messages appear on screen when you reach cumulative line-clear threshol
 - Top 10 scores displayed on the **right panel** during gameplay (refreshes every 30s)
 - Scores are also shown on the **Game Over** screen
 - Your score is **automatically saved** when the game ends
+- After the save completes, the game checks the leaderboard and shows an in-game congratulations banner with a rank-specific sound for #1 or top-10 placement
 - Stored in the `u_tetris_high_scores` table via GlideAjax
 - 🥇 Gold / 🥈 Silver / 🥉 Bronze highlighting for top 3
 
@@ -324,6 +325,8 @@ All sounds are synthesized using the **Web Audio API** — no external files nee
 | Level up | Fast ascending arpeggio (C5 → E6) |
 | Life lost | Descending sawtooth sweep |
 | Game over | Sad descending arpeggio (E5 → F4) |
+| #1 high score | Bright ascending champion fanfare |
+| Top 10 high score | Short ascending placement chime |
 | Swap (⇧) | Quick two-tone switch |
 
 ---

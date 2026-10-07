@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getHighScores, HighScoreEntry } from "../services/ScoreService";
+import { topScorerSound, topTenSound } from "../game/sounds";
 import "./GameOver.css";
 
 interface Props {
@@ -7,18 +8,22 @@ interface Props {
   level: number;
   lines: number;
   playerName: string;
+  scoreSaved: boolean;
   onRestart: () => void;
 }
 
-export default function GameOver({ score, level, lines, playerName, onRestart }: Props) {
+export default function GameOver({ score, level, lines, playerName, scoreSaved, onRestart }: Props) {
   const [scores, setScores] = useState<HighScoreEntry[]>([]);
   const [rank, setRank] = useState<number>(-1); // -1 = not loaded, 0 = not on board
 
   useEffect(() => {
     getHighScores().then((list) => {
       setScores(list);
-      // Find where this player's score lands
-      // Check from top — first entry whose score is <= ours (or same name+score)
+      if (!scoreSaved) {
+        setRank(0);
+        return;
+      }
+      // Use the leaderboard's actual ordering, including its ordering for ties.
       let r = 0;
       for (let i = 0; i < list.length; i++) {
         if (list[i].score === score && list[i].player_name === playerName) {
@@ -26,16 +31,11 @@ export default function GameOver({ score, level, lines, playerName, onRestart }:
           break;
         }
       }
-      // If not found by exact match, compute where we'd rank
-      if (r === 0) {
-        for (let i = 0; i < list.length; i++) {
-          if (score >= list[i].score) { r = i + 1; break; }
-        }
-        if (r === 0 && list.length < 10) r = list.length + 1;
-      }
       setRank(r);
+      if (r === 1) topScorerSound();
+      else if (r > 1 && r <= 10) topTenSound();
     }).catch(() => { setScores([]); setRank(0); });
-  }, []);
+  }, [score, playerName, scoreSaved]);
 
   const isTop1 = rank === 1;
   const isTop10 = rank > 0 && rank <= 10;

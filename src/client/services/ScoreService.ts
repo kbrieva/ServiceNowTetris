@@ -13,7 +13,7 @@ export async function saveScore(
   score: number,
   level: number
 ): Promise<void> {
-  await fetch(BASE_URL, {
+  const res = await fetch(BASE_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -26,6 +26,9 @@ export async function saveScore(
       u_level: level,
     }),
   });
+  if (!res.ok) {
+    throw new Error(`Score submission failed (${res.status})`);
+  }
 }
 
 /** Parse a numeric string that may contain commas (e.g. "1,200") */
