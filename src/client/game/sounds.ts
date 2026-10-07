@@ -217,3 +217,20 @@ export function boardClearSound(): void {
   // Sub-bass rumble for weight
   tone(261.63, 0.3, "sine", 0.15, 0.35);
 }
+
+/** Celebration for finishing as the #1 high scorer. */
+export function topScorerSound(): void {
+  // A bright ascending fanfare with a sustained major chord.
+  tone(659.25, 0.12, "triangle", 0.28, 0);
+  tone(783.99, 0.12, "triangle", 0.3, 0.12);
+  tone(1046.5, 0.16, "triangle", 0.34, 0.24);
+  chord(1046.5, 1318.5, 0.35, "sine", 0.22, 0.38);
+  tone(1567.98, 0.2, "sine", 0.13, 0.42);
+}
+
+/** Celebration for placing in the top ten. */
+export function topTenSound(): void {
+  tone(523.25, 0.1, "triangle", 0.24, 0);
+  tone(659.25, 0.14, "triangle", 0.28, 0.1);
+  tone(783.99, 0.22, "sine", 0.3, 0.22);
+}
