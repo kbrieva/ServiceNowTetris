@@ -15,7 +15,7 @@ interface Props {
   actionsRef: React.RefObject<GameActions>;
 }
 
-/** Touch-friendly button helper — uses onTouchStart for instant response */
+/** Shared pointer handler keeps each physical press to one action. */
 function TB({
   className,
   icon,
@@ -27,7 +27,7 @@ function TB({
   label: string;
   onAction: () => void;
 }) {
-  const handler = (e: React.TouchEvent | React.MouseEvent) => {
+  const handler = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
     onAction();
@@ -35,8 +35,8 @@ function TB({
   return (
     <button
       className={`mobile-btn ${className}`}
-      onTouchStart={handler}
-      onMouseDown={handler}
+      type="button"
+      onPointerDown={handler}
       onContextMenu={(e) => e.preventDefault()}
     >
       <span className="mobile-btn-icon">{icon}</span>
